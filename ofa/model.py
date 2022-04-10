@@ -107,8 +107,9 @@ class ConvUnit(nn.Module):
         return x
 
 
-class OnceForAll:
+class OnceForAll(nn.Module):
     def __init__(self, num_classes, max_image_size=(256, 256), unit_first_layer_strides=[2, 2, 2, 2, 2]):
+        super().__init__()
         self.conv_units = nn.ModuleList([ConvUnit(x) for x in unit_first_layer_strides])
         max_linear_weights = max_image_size[0] * max_image_size[1] * MAX_WIDTH
         self.linear_classifier = nn.Linear(max_linear_weights, num_classes)
