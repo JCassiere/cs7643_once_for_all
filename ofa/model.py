@@ -85,9 +85,27 @@ class ConvUnit(nn.Module):
     def __init__(self, first_layer_stride=2):
         super().__init__()
         # First layer in a unit has stride = 2 in order to decrease feature map size
-        self.layers = nn.ModuleList(
-            [DynamicConvLayer(stride=first_layer_stride)] + [DynamicConvLayer() for _ in range(MAX_DEPTH - 1)]
-        )
+        self.layers = nn.ModuleList([
+            DynamicConvLayer(stride=first_layer_stride),
+            DynamicConvLayer(),
+            DynamicConvLayer(),
+            DynamicConvLayer(),
+            DynamicConvLayer(),
+        ])
+        # self.activations = nn.ModuleList([
+        #     nn.ReLU(),
+        #     nn.ReLU(),
+        #     nn.Hardswish(),
+        #     nn.Hardswish(),
+        #     nn.Hardswish()
+        # ])
+        self.activations = nn.ModuleList([
+            nn.ReLU(),
+            nn.ReLU(),
+            nn.ReLU(),
+            nn.ReLU(),
+            nn.ReLU()
+        ])
         
     def forward(self, x, sample_unit_config: SampleUnitConfiguration):
         layer_configs = []
@@ -103,6 +121,7 @@ class ConvUnit(nn.Module):
         
         for i in range(sample_unit_config.depth):
             x = self.layers[i].forward(x, layer_configs[i])
+            x = self.activations[i](x)
             
         return x
 
