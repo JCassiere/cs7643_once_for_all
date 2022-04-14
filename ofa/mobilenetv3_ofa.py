@@ -128,19 +128,19 @@ class DynamicTransformableConv(nn.Module):
         self.five_by_five_transformation = nn.Parameter(torch.zeros((25, 25)))
         self.three_by_three_transformation = nn.Parameter(torch.zeros((9, 9)))
     
-    def forward(self, x: torch.Tensor, kernel_size, in_width, out_width):
+    def forward(self, x: torch.Tensor, kernel_size, channels):
         # TODO - pick best channels
         #  choose channels before or after shrinking kernel?
         #  Do channels just get re-sorted at each stage of progressive shrinking? Or
         #  do they get chosen during the forward pass of each minibatch?
         #  I think they get chosen at each stage of progressive shrinking, but I'm not sure
-        weights = self.base_conv.weight[:out_width, :in_width, :, :]
+        weights = self.base_conv.weight[:channels, :channels, :, :]
         # if out_w < MAX_CHANNELS:
         #     channel_importances = torch.norm(self.base_conv.weight, p=1, dim=0)
         
         (n, c, _, _) = weights.shape
         if kernel_size == 7:
-            weights = weights[:, :, :, :]
+            weights = weights
         # lay out the kernels in 1D vectors
         # perform matrix multiplication of these laid out kernels by the appropriate transformation
         # matrices, then reshape the product
@@ -183,49 +183,42 @@ class DynamicBlock(nn.Module):
     
         
 class DynamicInvertedResidual(nn.Module):
-    def __init__(self, in_channels, out_channels, max_expansion_ratio, kernel_size, stride, use_se, use_hs):
+    def __init__(self, in_channels, out_channels, max_expansion_ratio=6,
+                 max_kernel_size=7, stride=1, use_se=True, use_hs=True):
         super(DynamicInvertedResidual, self).__init__()
         assert stride in [1, 2]
+        self.in_channels = in_channels
+        self.out_channels = out_channels
         
         self.identity = stride == 1 and in_channels == out_channels
         max_hidden_channels = _make_divisible(in_channels * max_expansion_ratio, 8)
         
-        if max_expansion_ratio == 1:
-            self.conv = nn.Sequential(
-                # dw
-                DynamicTransformableConv(max_hidden_channels, kernel_size, stride),
-                DynamicBatchNorm(max_hidden_channels),
-                nn.Hardswish(inplace=True) if use_hs else nn.ReLU(inplace=True),
-                # Squeeze-and-Excite
-                DynamicSELayer(max_hidden_channels) if use_se else nn.Identity(),
-                # pw-linear
-                DynamicConv(max_hidden_channels, out_channels, 1, 1),
-                DynamicBatchNorm(out_channels),
-                nn.Hardswish(inplace=True) if use_hs else nn.ReLU(inplace=True)
-            )
-        else:
-            self.conv = nn.Sequential(
-                # pw
-                DynamicConv(in_channels, max_hidden_channels, 1, 1),
-                DynamicBatchNorm(max_hidden_channels),
-                nn.Hardswish(inplace=True) if use_hs else nn.ReLU(inplace=True),
-                # dw
-                DynamicTransformableConv(max_hidden_channels, kernel_size, stride),
-                DynamicBatchNorm(max_hidden_channels),
-                nn.Hardswish(inplace=True) if use_hs else nn.ReLU(inplace=True),
-                # Squeeze-and-Excite
-                DynamicSELayer(max_hidden_channels) if use_se else nn.Identity(),
-                # pw-linear
-                DynamicConv(max_hidden_channels, out_channels, 1, 1),
-                DynamicBatchNorm(out_channels),
-                nn.Hardswish(inplace=True) if use_hs else nn.ReLU(inplace=True)
-            )
+        self.activation = nn.Hardswish(inplace=True) if use_hs else nn.ReLU(inplace=True)
+        self.bottleneck = DynamicConv(in_channels, max_hidden_channels, 1, 1)
+        self.bottleneck_norm = DynamicBatchNorm(max_hidden_channels)
+        self.depthwise_convolution = DynamicTransformableConv(max_hidden_channels, max_kernel_size, stride)
+        self.depthwise_norm = DynamicBatchNorm(max_hidden_channels)
+        self.se_layer = DynamicSELayer(max_hidden_channels) if use_se else nn.Identity()
+        self.pointwise_conv = DynamicConv(max_hidden_channels, out_channels, 1, 1)
+        self.pointwise_norm = DynamicBatchNorm(out_channels)
     
-    def forward(self, x):
+    def forward(self, x, kernel_size, width_expansion_ratio):
+        hidden_channels = _make_divisible(self.in_channels * width_expansion_ratio, 8)
+        y = self.bottleneck.forward(x, self.in_channels, hidden_channels)
+        y = self.bottleneck_norm.forward(y)
+        y = self.activation(y)
+        y = self.depthwise_convolution.forward(y, kernel_size, hidden_channels)
+        y = self.depthwise_norm.forward(y)
+        y = self.activation(y)
+        y = self.se_layer.forward(y)
+        y = self.pointwise_conv.forward(y, hidden_channels, self.out_channels)
+        y = self.pointwise_norm.forward(y)
+        y = self.activation(y)
+        
         if self.identity:
-            return x + self.conv(x)
+            return x + y
         else:
-            return self.conv(x)
+            return y
 
 
 class MobileNetV3(nn.Module):
