@@ -14,6 +14,7 @@ import math
 __all__ = ['mobilenetv3_large', 'mobilenetv3_small']
 
 import torch.nn.init
+from collections import OrderedDict
 
 
 def same_padding(kernel_size):
@@ -40,21 +41,25 @@ def _make_divisible(v, divisor, min_value=None):
     return new_v
 
 
-class SELayer(nn.Module):
-    def __init__(self, channel, reduction=4):
-        super(SELayer, self).__init__()
+class DynamicSELayer(nn.Module):
+    def __init__(self, channels, reduction=4):
+        super(DynamicSELayer, self).__init__()
+        self.reduction = reduction
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.fc = nn.Sequential(
-            nn.Linear(channel, _make_divisible(channel // reduction, 8)),
-            nn.ReLU(inplace=True),
-            nn.Linear(_make_divisible(channel // reduction, 8), channel),
-            nn.Hardsigmoid(inplace=True)
-        )
+        hidden_channels = _make_divisible(channels // self.reduction, 8)
+        self.squeeze = nn.Linear(channels, hidden_channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.excite = nn.Linear(hidden_channels, channels)
+        self.hsigmoid = nn.Hardsigmoid(inplace=True)
     
     def forward(self, x):
-        b, c, _, _ = x.size()
-        y = self.avg_pool(x).view(b, c)
-        y = self.fc(y).view(b, c, 1, 1)
+        batch, in_channels, _, _ = x.size()
+        hidden_channels = _make_divisible(in_channels // self.reduction, 8)
+        y = self.avg_pool(x).view(batch, in_channels)
+        y = F.linear(y, self.squeeze.weight[:hidden_channels, :in_channels], self.squeeze.bias[:hidden_channels])
+        y = self.relu(y)
+        y = F.linear(y, self.excite.weight[:in_channels, :hidden_channels], self.excite.bias[:in_channels])
+        y = self.hsigmoid(y).view(batch, in_channels, 1, 1)
         return x * y
 
 
@@ -73,54 +78,146 @@ def conv_1x1_bn(inp, oup):
         nn.Hardswish(inplace=True)
     )
 
+
+# class SampleLayerConfiguration:
+#     def __init__(self, input_channels, kernel_size=MAX_KERNEL_SIZE, width=MAX_WIDTH):
+#         self.kernel_size = kernel_size
+#         self.width = width
+#         self.input_channels = input_channels
+
+class DynamicBatchNorm(nn.Module):
+    def __init__(self, max_dim):
+        super(DynamicBatchNorm, self).__init__()
+        self.base_batch_norm = nn.BatchNorm2d(max_dim)
+        
+    def forward(self, x):
+        # Adapted from pytorch source code:
+        # https://github.com/pytorch/pytorch/blob/10c4b98ade8349d841518d22f19a653a939e260c/torch/nn/modules/batchnorm.py#L58-L81
+        dim = x.size(1)
+
+        if self.base_batch_norm.momentum is None:
+            exponential_average_factor = 0.0
+        else:
+            exponential_average_factor = self.base_batch_norm.momentum
+
+        if self.base_batch_norm.training and self.base_batch_norm.track_running_stats:
+            if self.base_batch_norm.num_batches_tracked is not None:
+                self.base_batch_norm.num_batches_tracked += 1
+                if self.base_batch_norm.momentum is None:
+                    exponential_average_factor = 1.0 / float(self.base_batch_norm.num_batches_tracked)
+                else:
+                    exponential_average_factor = self.base_batch_norm.momentum
+        return F.batch_norm(
+            x,
+            self.base_batch_norm.running_mean[:dim],
+            self.base_batch_norm.running_var[:dim],
+            self.base_batch_norm.weight[:dim],
+            self.base_batch_norm.bias[:dim],
+            self.base_batch_norm.training or not self.base_batch_norm.track_running_stats,
+            exponential_average_factor,
+            self.base_batch_norm.eps,
+        )
+
+
+class DynamicTransformableConv(nn.Module):
+    def __init__(self, channels, max_kernel_size, stride=1):
+        super(DynamicTransformableConv, self).__init__()
+        self.base_conv = nn.Conv2d(channels, kernel_size=max_kernel_size,
+                                   padding=same_padding(max_kernel_size), stride=stride,
+                                   groups=channels, bias=False)
+        self.five_by_five_transformation = nn.Parameter(torch.zeros((25, 25)))
+        self.three_by_three_transformation = nn.Parameter(torch.zeros((9, 9)))
+    
+    def forward(self, x: torch.Tensor, kernel_size, in_width, out_width):
+        # TODO - pick best channels
+        #  choose channels before or after shrinking kernel?
+        #  Do channels just get re-sorted at each stage of progressive shrinking? Or
+        #  do they get chosen during the forward pass of each minibatch?
+        #  I think they get chosen at each stage of progressive shrinking, but I'm not sure
+        weights = self.base_conv.weight[:out_width, :in_width, :, :]
+        # if out_w < MAX_CHANNELS:
+        #     channel_importances = torch.norm(self.base_conv.weight, p=1, dim=0)
+        
+        (n, c, _, _) = weights.shape
+        if kernel_size == 7:
+            weights = weights[:, :, :, :]
+        # lay out the kernels in 1D vectors
+        # perform matrix multiplication of these laid out kernels by the appropriate transformation
+        # matrices, then reshape the product
+        # for example, for a 5x5 kernel, lay it out to be 1x25
+        # then multiply by the 25x25 transformation matrix to get a transformed 1x25 matrix
+        # then view that as a 5x5 matrix, which is your kernel
+        elif kernel_size == 5:
+            weights = weights[:, :, 1:6, 1:6].view(n, c, 1, 25)
+            weights = torch.matmul(weights, self.five_by_five_transformation).view(n, c, 5, 5)
+        elif kernel_size == 3:
+            weights = weights[:, :, 2:5, 2:5].view(n, c, 1, 9)
+            weights = torch.matmul(weights, self.three_by_three_transformation).view(n, c, 3, 3)
+        else:
+            raise ValueError("Invalid kernel size supplied to DynamicConvLayer")
+        
+        # TODO - weight standardization?
+        return F.conv2d(x, weights, None,
+                        self.base_conv.stride, padding=same_padding(kernel_size))
+
+
 class DynamicConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1):
+        super(DynamicConv, self).__init__()
         self.base_conv = nn.Conv2d(in_channels=in_channels, out_channels=out_channels,
                                    kernel_size=(kernel_size, kernel_size),
                                    padding=same_padding(kernel_size), stride=(stride, stride),
                                    bias=False)
         
     def forward(self, x, in_width, out_width):
+        # TODO - pick best channels
         weights = self.base_conv.weight[:out_width, :in_width, :, :]
         return F.conv2d(x, weights, bias=None,
                         stride=self.base_conv.stride, padding=self.base_conv.padding)
+    
         
+class DynamicBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(DynamicBlock, self).__init__()
+        self.blocks = [DynamicInvertedResidual() for _ in range(5)]
+    
         
 class DynamicInvertedResidual(nn.Module):
-    def __init__(self, inp, hidden_dim, oup, kernel_size, stride, use_se, use_hs):
+    def __init__(self, in_channels, out_channels, max_expansion_ratio, kernel_size, stride, use_se, use_hs):
         super(DynamicInvertedResidual, self).__init__()
         assert stride in [1, 2]
         
-        self.identity = stride == 1 and inp == oup
+        self.identity = stride == 1 and in_channels == out_channels
+        max_hidden_channels = _make_divisible(in_channels * max_expansion_ratio, 8)
         
-        if inp == hidden_dim:
+        if max_expansion_ratio == 1:
             self.conv = nn.Sequential(
                 # dw
-                nn.Conv2d(hidden_dim, hidden_dim, kernel_size, stride, (kernel_size - 1) // 2, groups=hidden_dim, bias=False),
-                nn.BatchNorm2d(hidden_dim),
+                DynamicTransformableConv(max_hidden_channels, kernel_size, stride),
+                DynamicBatchNorm(max_hidden_channels),
                 nn.Hardswish(inplace=True) if use_hs else nn.ReLU(inplace=True),
                 # Squeeze-and-Excite
-                SELayer(hidden_dim) if use_se else nn.Identity(),
+                DynamicSELayer(max_hidden_channels) if use_se else nn.Identity(),
                 # pw-linear
-                nn.Conv2d(hidden_dim, oup, 1, 1, 0, bias=False),
-                nn.BatchNorm2d(oup),
+                DynamicConv(max_hidden_channels, out_channels, 1, 1),
+                DynamicBatchNorm(out_channels),
                 nn.Hardswish(inplace=True) if use_hs else nn.ReLU(inplace=True)
             )
         else:
             self.conv = nn.Sequential(
                 # pw
-                nn.Conv2d(inp, hidden_dim, 1, 1, 0, bias=False),
-                nn.BatchNorm2d(hidden_dim),
+                DynamicConv(in_channels, max_hidden_channels, 1, 1),
+                DynamicBatchNorm(max_hidden_channels),
                 nn.Hardswish(inplace=True) if use_hs else nn.ReLU(inplace=True),
                 # dw
-                nn.Conv2d(hidden_dim, hidden_dim, kernel_size, stride, (kernel_size - 1) // 2, groups=hidden_dim, bias=False),
-                nn.BatchNorm2d(hidden_dim),
+                DynamicTransformableConv(max_hidden_channels, kernel_size, stride),
+                DynamicBatchNorm(max_hidden_channels),
+                nn.Hardswish(inplace=True) if use_hs else nn.ReLU(inplace=True),
                 # Squeeze-and-Excite
-                SELayer(hidden_dim) if use_se else nn.Identity(),
-                # nn.Hardswish(inplace=True) if use_hs else nn.ReLU(inplace=True),
+                DynamicSELayer(max_hidden_channels) if use_se else nn.Identity(),
                 # pw-linear
-                nn.Conv2d(hidden_dim, oup, 1, 1, 0, bias=False),
-                nn.BatchNorm2d(oup),
+                DynamicConv(max_hidden_channels, out_channels, 1, 1),
+                DynamicBatchNorm(out_channels),
                 nn.Hardswish(inplace=True) if use_hs else nn.ReLU(inplace=True)
             )
     
@@ -140,7 +237,7 @@ class MobileNetV3(nn.Module):
         
         # building first layer
         input_channel = _make_divisible(16 * width_mult, 8)
-        layers = [conv_3x3_bn(3, input_channel, 2)]
+        layers = [conv_3x3_bn(3, input_channel, 1)]
         # building inverted residual blocks
         for k, t, c, use_se, use_hs, s in self.cfgs:
             output_channel = _make_divisible(c * width_mult, 8)
@@ -215,7 +312,7 @@ def mobilenetv3_small(**kwargs):
     """
     cfgs = [
         # k, t, c, SE, HS, s
-        [3,    1,  16, 1, 0, 2],
+        [3,    1,  16, 1, 0, 1],
         [3,  4.5,  24, 0, 0, 1],
         [3, 3.67,  24, 0, 0, 1],
         [5,    4,  40, 1, 1, 2],
