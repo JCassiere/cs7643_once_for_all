@@ -176,21 +176,16 @@ class DynamicConv(nn.Module):
                         stride=self.base_conv.stride, padding=self.base_conv.padding)
     
         
-class DynamicBlock(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(DynamicBlock, self).__init__()
-        self.blocks = [DynamicInvertedResidual() for _ in range(5)]
     
         
 class DynamicInvertedResidual(nn.Module):
     def __init__(self, in_channels, out_channels, max_expansion_ratio=6,
                  max_kernel_size=7, stride=1, use_se=True, use_hs=True):
         super(DynamicInvertedResidual, self).__init__()
-        assert stride in [1, 2]
         self.in_channels = in_channels
         self.out_channels = out_channels
         
-        self.identity = stride == 1 and in_channels == out_channels
+        self.add_residual = stride == 1 and in_channels == out_channels
         max_hidden_channels = _make_divisible(in_channels * max_expansion_ratio, 8)
         
         self.activation = nn.Hardswish(inplace=True) if use_hs else nn.ReLU(inplace=True)
@@ -215,10 +210,26 @@ class DynamicInvertedResidual(nn.Module):
         y = self.pointwise_norm.forward(y)
         y = self.activation(y)
         
-        if self.identity:
+        if self.add_residual:
             return x + y
         else:
             return y
+
+
+class DynamicBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1, use_se=True, use_hs=True):
+        super(DynamicBlock, self).__init__()
+        self.blocks = [
+            DynamicInvertedResidual(in_channels, out_channels, stride=stride, use_se=use_se, use_hs=use_hs)
+        ] + [
+            DynamicInvertedResidual(out_channels, out_channels, use_se=use_se, use_hs=use_hs) for _ in range(4)
+        ]
+        
+    def forward(self, x, depth, kernel_sizes, expansion_ratios):
+        y = self.blocks[0].forward(x, kernel_sizes[0], expansion_ratios[0])
+        for i in range(1, depth):
+            y = self.blocks[i].forward(y, kernel_sizes[i], expansion_ratios[i])
+        return y
 
 
 class MobileNetV3(nn.Module):
