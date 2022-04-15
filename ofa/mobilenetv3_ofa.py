@@ -66,6 +66,57 @@ class DynamicSELayer(nn.Module):
         y = F.linear(y, self.excite.weight[:in_channels, :hidden_channels], self.excite.bias[:in_channels])
         y = self.hsigmoid(y).view(batch, in_channels, 1, 1)
         return x * y
+    
+    def reorganize_channels(self, sorted_indices):
+        # reorganize SE excite output channels according to importance of
+        # pointwise linear inputs
+        self.excite.weight.data = torch.index_select(
+            self.excite.weight.data,
+            dim=0,
+            index=sorted_indices
+        )
+        self.excite.bias.data = torch.index_select(
+            self.excite.bias.data,
+            dim=0,
+            index=sorted_indices
+        )
+        # SE squeeze will have the same number of inputs as the excite has outputs,
+        # so reorganize the inputs the same way
+        self.squeeze.weight.data = torch.index_select(
+            self.squeeze.weight.data,
+            dim=1,
+            index=sorted_indices
+        )
+        self.squeeze.bias.data = torch.index_select(
+            self.squeeze.bias.data,
+            dim=1,
+            index=sorted_indices
+        )
+        # Then reorganize the squeeze-excite "hidden" channels according to
+        # their importances
+        # do this by measuring importance of the input channels to the excitation layer
+        importance = torch.sum(torch.abs(self.excite.weight), dim=(0, 2, 3))
+        _, internal_sorted_indices = torch.sort(importance, dim=0, descending=True)
+        self.excite.weight.data = torch.index_select(
+            self.excite.weight.data,
+            dim=1,
+            index=internal_sorted_indices
+        )
+        self.excite.bias.data = torch.index_select(
+            self.excite.bias.data,
+            dim=1,
+            index=internal_sorted_indices
+        )
+        self.squeeze.weight.data = torch.index_select(
+            self.squeeze.weight.data,
+            dim=0,
+            index=internal_sorted_indices
+        )
+        self.squeeze.bias.data = torch.index_select(
+            self.squeeze.bias.data,
+            dim=0,
+            index=internal_sorted_indices
+        )
 
 
 class DynamicBatchNorm(nn.Module):
@@ -100,6 +151,18 @@ class DynamicBatchNorm(nn.Module):
             exponential_average_factor,
             self.base_batch_norm.eps,
         )
+    
+    def reorganize_weights(self, sorted_indices):
+        self.base_batch_norm.weight.data = torch.index_select(
+            self.base_batch_norm.weight.data,
+            dim=0,
+            index=sorted_indices
+        )
+        self.base_batch_norm.bias.data = torch.index_select(
+            self.base_batch_norm.bias.data,
+            dim=0,
+            index=sorted_indices
+        )
 
 
 class DynamicDepthwiseConv(nn.Module):
@@ -112,18 +175,8 @@ class DynamicDepthwiseConv(nn.Module):
         self.three_by_three_transformation = nn.Parameter(torch.zeros((9, 9)))
     
     def forward(self, x: torch.Tensor, kernel_size, channels):
-        # TODO - pick best channels
-        #  choose channels before or after shrinking kernel?
-        #  Do channels just get re-sorted at each stage of progressive shrinking? Or
-        #  do they get chosen during the forward pass of each minibatch?
-        #  I think they get chosen at each stage of progressive shrinking, but I'm not sure
-        
         # TODO - don't copy weights - mask somehow?
-        weights = self.base_conv.weight[:channels, :channels, :, :]
-        # if out_w < MAX_CHANNELS:
-        #     channel_importances = torch.norm(self.base_conv.weight, p=1, dim=0)
-        
-        (n, c, _, _) = weights.shape
+        (n, c, _, _) = self.base_conv.weight.shape
         if kernel_size == 7:
             weights = self.base_conv.weight[:channels, :channels, :, :]
         # lay out the kernels in 1D vectors
@@ -145,6 +198,13 @@ class DynamicDepthwiseConv(nn.Module):
         return F.conv2d(x, weights, None,
                         self.base_conv.stride, padding=same_padding(kernel_size),
                         groups=channels)
+    
+    def reorganize_channels(self, sorted_indices, dim):
+        self.base_conv.weight.data = torch.index_select(
+            self.base_conv.weight.data,
+            dim=dim,
+            index=sorted_indices
+        )
 
 
 class DynamicConv(nn.Module):
@@ -156,11 +216,18 @@ class DynamicConv(nn.Module):
                                    bias=False)
         
     def forward(self, x, in_width, out_width):
-        # TODO - pick best channels
         weights = self.base_conv.weight[:out_width, :in_width, :, :]
         return F.conv2d(x, weights, bias=None,
                         stride=self.base_conv.stride, padding=self.base_conv.padding)
     
+    def reorganize_channels(self, sorted_indices, dim):
+        self.base_conv.weight.data = torch.index_select(
+            self.base_conv.weight.data,
+            dim=dim,
+            index=sorted_indices
+        )
+
+
 class FirstInvertedResidual(nn.Module):
     '''
     The first inverted residual layer is not dynamic. It has an expansion ratio of 1,
@@ -195,6 +262,7 @@ class DynamicInvertedResidual(nn.Module):
         super(DynamicInvertedResidual, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
+        self.use_se = use_se
         
         self.add_residual = stride == 1 and in_channels == out_channels
         max_hidden_channels = _make_divisible(in_channels * max_expansion_ratio, 8)
@@ -226,6 +294,20 @@ class DynamicInvertedResidual(nn.Module):
             return x + y
         else:
             return y
+
+    def reorder_channels(self):
+        # sort all channels based on the L1 norm of the input channels to the pointwise
+        # linear convolution
+        importance = torch.sum(torch.abs(self.pointwise_conv.base_conv.weight), dim=(0, 2, 3))
+        sorted_values, sorted_indices = torch.sort(importance, dim=0, descending=True)
+        self.pointwise_conv.reorganize_channels(sorted_indices, 1)
+        self.depthwise_norm.reorganize_weights(sorted_indices)
+        self.depthwise_convolution.reorganize_channels(sorted_indices, 0)
+        if self.use_se:
+            self.se_layer.reorganize_channels(sorted_indices)
+            
+        self.bottleneck_norm.reorganize_weights(sorted_indices)
+        self.bottleneck.reorganize_channels(sorted_indices, 0)
 
 
 class DynamicBlock(nn.Module):
