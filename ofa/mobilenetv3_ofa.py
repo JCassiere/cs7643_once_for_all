@@ -23,7 +23,7 @@ def activation_function(use_hard_swish=True):
         return nn.ReLU(inplace=True)
 
 def same_padding(kernel_size):
-    return (kernel_size - 1) / 2
+    return kernel_size // 2
 
 
 def _make_divisible(v, divisor, min_value=None):
@@ -105,7 +105,7 @@ class DynamicBatchNorm(nn.Module):
 class DynamicDepthwiseConv(nn.Module):
     def __init__(self, channels, max_kernel_size, stride=1):
         super(DynamicDepthwiseConv, self).__init__()
-        self.base_conv = nn.Conv2d(channels, kernel_size=max_kernel_size,
+        self.base_conv = nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=max_kernel_size,
                                    padding=same_padding(max_kernel_size), stride=stride,
                                    groups=channels, bias=False)
         self.five_by_five_transformation = nn.Parameter(torch.zeros((25, 25)))
@@ -117,13 +117,15 @@ class DynamicDepthwiseConv(nn.Module):
         #  Do channels just get re-sorted at each stage of progressive shrinking? Or
         #  do they get chosen during the forward pass of each minibatch?
         #  I think they get chosen at each stage of progressive shrinking, but I'm not sure
+        
+        # TODO - don't copy weights - mask somehow?
         weights = self.base_conv.weight[:channels, :channels, :, :]
         # if out_w < MAX_CHANNELS:
         #     channel_importances = torch.norm(self.base_conv.weight, p=1, dim=0)
         
         (n, c, _, _) = weights.shape
         if kernel_size == 7:
-            weights = weights
+            weights = self.base_conv.weight[:channels, :channels, :, :]
         # lay out the kernels in 1D vectors
         # perform matrix multiplication of these laid out kernels by the appropriate transformation
         # matrices, then reshape the product
@@ -131,17 +133,18 @@ class DynamicDepthwiseConv(nn.Module):
         # then multiply by the 25x25 transformation matrix to get a transformed 1x25 matrix
         # then view that as a 5x5 matrix, which is your kernel
         elif kernel_size == 5:
-            weights = weights[:, :, 1:6, 1:6].view(n, c, 1, 25)
+            weights = self.base_conv.weight[:channels, :channels, 1:6, 1:6].view(n, c, 1, 25)
             weights = torch.matmul(weights, self.five_by_five_transformation).view(n, c, 5, 5)
         elif kernel_size == 3:
-            weights = weights[:, :, 2:5, 2:5].view(n, c, 1, 9)
+            weights = self.base_conv.weight[:channels, :channels, 2:5, 2:5].view(n, c, 1, 9)
             weights = torch.matmul(weights, self.three_by_three_transformation).view(n, c, 3, 3)
         else:
             raise ValueError("Invalid kernel size supplied to DynamicConvLayer")
         
         # TODO - weight standardization?
         return F.conv2d(x, weights, None,
-                        self.base_conv.stride, padding=same_padding(kernel_size))
+                        self.base_conv.stride, padding=same_padding(kernel_size),
+                        groups=channels)
 
 
 class DynamicConv(nn.Module):
@@ -171,7 +174,7 @@ class FirstInvertedResidual(nn.Module):
         hidden_channels = _make_divisible(in_channels, 8)
         
         self.conv = nn.Sequential(
-            nn.Conv2d(hidden_channels, hidden_channels, kernel_size, stride),
+            nn.Conv2d(hidden_channels, hidden_channels, kernel_size, stride, padding=same_padding(kernel_size)),
             nn.BatchNorm2d(hidden_channels),
             nn.ReLU(inplace=True),
             nn.Conv2d(hidden_channels, out_channels, 1, 1),
@@ -228,18 +231,19 @@ class DynamicInvertedResidual(nn.Module):
 class DynamicBlock(nn.Module):
     def __init__(self, in_channels, out_channels, max_kernel_size=7, max_expansion_ratio=6, stride=1, use_se=True, use_hs=True):
         super(DynamicBlock, self).__init__()
-        self.blocks = [
+        self.layers = [
             DynamicInvertedResidual(in_channels, out_channels, max_kernel_size, max_expansion_ratio,
                                     stride=stride, use_se=use_se, use_hs=use_hs)
         ] + [
             DynamicInvertedResidual(out_channels, out_channels, max_kernel_size, max_expansion_ratio,
                                     use_se=use_se, use_hs=use_hs) for _ in range(3)
         ]
+        self.layers = nn.ModuleList(self.layers)
         
     def forward(self, x, depth, kernel_sizes, expansion_ratios):
-        y = self.blocks[0].forward(x, kernel_sizes[0], expansion_ratios[0])
+        y = self.layers[0].forward(x, kernel_sizes[0], expansion_ratios[0])
         for i in range(1, depth):
-            y = self.blocks[i].forward(y, kernel_sizes[i], expansion_ratios[i])
+            y = self.layers[i].forward(y, kernel_sizes[i], expansion_ratios[i])
         return y
     
     
@@ -257,7 +261,7 @@ class MobileNetV3OFA(nn.Module):
         if use_hard_swishes is None:
             use_hard_swishes = [True, False, False, True, True, True, True, True, True]
         if strides is None:
-            strides = [1, 1, 1, 2, 1, 1, 1, 1, 1]
+            strides = [1, 1, 2, 2, 1, 2, 1, 1, 1]
         
         output_widths = [_make_divisible(x * width_mult, 8) for x in output_widths]
         self.first_conv = nn.Sequential(
@@ -281,7 +285,7 @@ class MobileNetV3OFA(nn.Module):
                 use_se=use_squeeze_excites[i],
                 use_hs=use_hard_swishes[i])
             )
-
+        self.blocks = nn.ModuleList(self.blocks)
         self.final_conv = nn.Sequential(
             nn.Conv2d(output_widths[-3], output_widths[-2], 1, strides[-2], 0, bias=False),
             nn.BatchNorm2d(output_widths[-2]),
@@ -302,9 +306,9 @@ class MobileNetV3OFA(nn.Module):
         y = self.first_conv(x)
         y = self.first_inverted_residual(y)
         for i in range(len(self.blocks)):
-            y = self.blocks[i].forward(y, depths[i], kernel_sizes[i], expansion_ratios)
+            y = self.blocks[i].forward(y, depths[i], kernel_sizes[i], expansion_ratios[i])
         y = self.final_conv(y)
-        y = self.avgpool(y).view(y.size[0], -1)
+        y = self.avgpool(y).view(y.size(0), -1)
         y = self.classifier(y)
         
         return y
@@ -368,22 +372,4 @@ class MobileNetV3OFA(nn.Module):
 #     return MobileNetV3(cfgs, mode='small', **kwargs)
 
 def mobilenetv3_ofa(**kwargs):
-    output_widths = [16, 16, 24, 40, 80, 112, 160, 960, 1280]
-    use_squeeze_excite = [0, 0, 1, 0, 1, 1, 1, 1, 1]
-    use_hard_swish = [0, 0, 0, 1, 1, 1, 1, 1, 1]
-    stride = [1, 1, 1, 2, 1, 1, 1, 1, 1]
-    
-    cfgs = [
-        # c, SE, HS, s
-        [16, 0, 0, 1],
-        [16, 0, 0, 1],
-        [24, 1, 0, 1],
-        [40, 0, 1, 2],
-        [80, 1, 1, 1],
-        [112, 1, 1, 1],
-        [160, 1, 1, 1],
-        [960, 1, 1, 1],
-        [1280, 1, 1, 1],
-    ]
-
-    return MobileNetV3OFA(cfgs, **kwargs)
+    return MobileNetV3OFA(**kwargs)
