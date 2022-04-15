@@ -119,9 +119,9 @@ class DynamicBatchNorm(nn.Module):
         )
 
 
-class DynamicTransformableConv(nn.Module):
+class DynamicDepthwiseConv(nn.Module):
     def __init__(self, channels, max_kernel_size, stride=1):
-        super(DynamicTransformableConv, self).__init__()
+        super(DynamicDepthwiseConv, self).__init__()
         self.base_conv = nn.Conv2d(channels, kernel_size=max_kernel_size,
                                    padding=same_padding(max_kernel_size), stride=stride,
                                    groups=channels, bias=False)
@@ -175,9 +175,34 @@ class DynamicConv(nn.Module):
         return F.conv2d(x, weights, bias=None,
                         stride=self.base_conv.stride, padding=self.base_conv.padding)
     
+class FirstInvertedResidual(nn.Module):
+    '''
+    The first inverted residual layer is not dynamic. It has an expansion ratio of 1,
+    meaning, there is no linear bottleneck at the beginning. It uses a kernel size
+    of 3, does not use squeeze-excite, and uses ReLU as its activation function.
+    '''
+    def __init__(self, in_channels, out_channels, stride=1):
+        super(FirstInvertedResidual, self).__init__()
+        kernel_size = 3
+        self.add_residual = stride == 1 and in_channels == out_channels
+        hidden_channels = _make_divisible(in_channels, 8)
         
+        self.conv = nn.Sequential(
+            nn.Conv2d(hidden_channels, hidden_channels, kernel_size, stride),
+            nn.BatchNorm2d(hidden_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(hidden_channels, out_channels, 1, 1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
     
-        
+    def forward(self, x):
+        if self.add_residual:
+            return x + self.conv(x)
+        else:
+            return self.conv(x)
+
+
 class DynamicInvertedResidual(nn.Module):
     def __init__(self, in_channels, out_channels, max_expansion_ratio=6,
                  max_kernel_size=7, stride=1, use_se=True, use_hs=True):
@@ -189,9 +214,10 @@ class DynamicInvertedResidual(nn.Module):
         max_hidden_channels = _make_divisible(in_channels * max_expansion_ratio, 8)
         
         self.activation = nn.Hardswish(inplace=True) if use_hs else nn.ReLU(inplace=True)
+        self.max_expansion_ratio = max_expansion_ratio
         self.bottleneck = DynamicConv(in_channels, max_hidden_channels, 1, 1)
         self.bottleneck_norm = DynamicBatchNorm(max_hidden_channels)
-        self.depthwise_convolution = DynamicTransformableConv(max_hidden_channels, max_kernel_size, stride)
+        self.depthwise_convolution = DynamicDepthwiseConv(max_hidden_channels, max_kernel_size, stride)
         self.depthwise_norm = DynamicBatchNorm(max_hidden_channels)
         self.se_layer = DynamicSELayer(max_hidden_channels) if use_se else nn.Identity()
         self.pointwise_conv = DynamicConv(max_hidden_channels, out_channels, 1, 1)
@@ -222,7 +248,7 @@ class DynamicBlock(nn.Module):
         self.blocks = [
             DynamicInvertedResidual(in_channels, out_channels, stride=stride, use_se=use_se, use_hs=use_hs)
         ] + [
-            DynamicInvertedResidual(out_channels, out_channels, use_se=use_se, use_hs=use_hs) for _ in range(4)
+            DynamicInvertedResidual(out_channels, out_channels, use_se=use_se, use_hs=use_hs) for _ in range(3)
         ]
         
     def forward(self, x, depth, kernel_sizes, expansion_ratios):
@@ -230,27 +256,35 @@ class DynamicBlock(nn.Module):
         for i in range(1, depth):
             y = self.blocks[i].forward(y, kernel_sizes[i], expansion_ratios[i])
         return y
-
-
-class MobileNetV3(nn.Module):
-    def __init__(self, cfgs, mode, num_classes=1000, width_mult=1.):
-        super(MobileNetV3, self).__init__()
+    
+    
+class MobileNetV3OFA(nn.Module):
+    def __init__(self, cfgs, mode, input_data_channels=3, num_classes=1000, width_mult=1.):
+        super(MobileNetV3OFA, self).__init__()
         # setting of inverted residual blocks
         self.cfgs = cfgs
         assert mode in ['large', 'small']
         
+        layer_channel_sizes = [16, 16, 24, 40, 80, 112, 160, 960, 1280]
+        widths = [_make_divisible(x * width_mult, 8) for x in layer_channel_sizes]
         # building first layer
-        input_channel = _make_divisible(16 * width_mult, 8)
-        layers = [conv_3x3_bn(3, input_channel, 1)]
+        # self.first_conv = conv_3x3_bn(3, first_inverted_residual_input_channels, 1)
+        self.first_conv = nn.Sequential(
+            nn.Conv2d(input_data_channels, widths[0],
+                      kernel_size=3, stride=1, padding=same_padding(3), bias=False),
+            nn.BatchNorm2d(widths[0]),
+            nn.Hardswish(inplace=True)
+        )
+        self.first_inverted_residual = FirstInvertedResidual(widths[0], widths[1], 1)
         # building inverted residual blocks
         for k, t, c, use_se, use_hs, s in self.cfgs:
             output_channel = _make_divisible(c * width_mult, 8)
-            exp_size = _make_divisible(input_channel * t, 8)
-            layers.append(DynamicInvertedResidual(input_channel, exp_size, output_channel, k, s, use_se, use_hs))
-            input_channel = output_channel
+            exp_size = _make_divisible(first_inverted_residual_input_channels * t, 8)
+            layers.append(DynamicInvertedResidual(first_inverted_residual_input_channels, exp_size, output_channel, k, s, use_se, use_hs))
+            first_inverted_residual_input_channels = output_channel
         self.features = nn.Sequential(*layers)
         # building last several layers
-        self.conv = conv_1x1_bn(input_channel, exp_size)
+        self.conv = conv_1x1_bn(first_inverted_residual_input_channels, exp_size)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         output_channel = {'large': 1280, 'small': 1024}
         output_channel = _make_divisible(output_channel[mode] * width_mult, 8) if width_mult > 1.0 else output_channel[mode]
