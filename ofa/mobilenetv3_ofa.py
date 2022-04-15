@@ -11,11 +11,16 @@ import torch.nn.functional as F
 import math
 
 
-__all__ = ['mobilenetv3_large', 'mobilenetv3_small']
+# __all__ = ['mobilenetv3_large', 'mobilenetv3_small']
 
 import torch.nn.init
 from collections import OrderedDict
 
+def activation_function(use_hard_swish=True):
+    if use_hard_swish:
+        return nn.Hardswish(inplace=True)
+    else:
+        return nn.ReLU(inplace=True)
 
 def same_padding(kernel_size):
     return (kernel_size - 1) / 2
@@ -62,28 +67,6 @@ class DynamicSELayer(nn.Module):
         y = self.hsigmoid(y).view(batch, in_channels, 1, 1)
         return x * y
 
-
-def conv_3x3_bn(inp, oup, stride):
-    return nn.Sequential(
-        nn.Conv2d(inp, oup, 3, stride, 1, bias=False),
-        nn.BatchNorm2d(oup),
-        nn.Hardswish(inplace=True)
-    )
-
-
-def conv_1x1_bn(inp, oup):
-    return nn.Sequential(
-        nn.Conv2d(inp, oup, 1, 1, 0, bias=False),
-        nn.BatchNorm2d(oup),
-        nn.Hardswish(inplace=True)
-    )
-
-
-# class SampleLayerConfiguration:
-#     def __init__(self, input_channels, kernel_size=MAX_KERNEL_SIZE, width=MAX_WIDTH):
-#         self.kernel_size = kernel_size
-#         self.width = width
-#         self.input_channels = input_channels
 
 class DynamicBatchNorm(nn.Module):
     def __init__(self, max_dim):
@@ -204,8 +187,8 @@ class FirstInvertedResidual(nn.Module):
 
 
 class DynamicInvertedResidual(nn.Module):
-    def __init__(self, in_channels, out_channels, max_expansion_ratio=6,
-                 max_kernel_size=7, stride=1, use_se=True, use_hs=True):
+    def __init__(self, in_channels, out_channels, max_kernel_size=7,
+                 max_expansion_ratio=6, stride=1, use_se=True, use_hs=True):
         super(DynamicInvertedResidual, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -243,12 +226,14 @@ class DynamicInvertedResidual(nn.Module):
 
 
 class DynamicBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, stride=1, use_se=True, use_hs=True):
+    def __init__(self, in_channels, out_channels, max_kernel_size=7, max_expansion_ratio=6, stride=1, use_se=True, use_hs=True):
         super(DynamicBlock, self).__init__()
         self.blocks = [
-            DynamicInvertedResidual(in_channels, out_channels, stride=stride, use_se=use_se, use_hs=use_hs)
+            DynamicInvertedResidual(in_channels, out_channels, max_kernel_size, max_expansion_ratio,
+                                    stride=stride, use_se=use_se, use_hs=use_hs)
         ] + [
-            DynamicInvertedResidual(out_channels, out_channels, use_se=use_se, use_hs=use_hs) for _ in range(3)
+            DynamicInvertedResidual(out_channels, out_channels, max_kernel_size, max_expansion_ratio,
+                                    use_se=use_se, use_hs=use_hs) for _ in range(3)
         ]
         
     def forward(self, x, depth, kernel_sizes, expansion_ratios):
@@ -259,51 +244,70 @@ class DynamicBlock(nn.Module):
     
     
 class MobileNetV3OFA(nn.Module):
-    def __init__(self, cfgs, mode, input_data_channels=3, num_classes=1000, width_mult=1.):
+    def __init__(self, output_widths=None, use_squeeze_excites=None,
+                 use_hard_swishes=None, strides=None, input_data_channels=3, num_classes=1000,
+                 width_mult=1., max_kernel_size=7, max_expansion_ratio=6):
         super(MobileNetV3OFA, self).__init__()
+
         # setting of inverted residual blocks
-        self.cfgs = cfgs
-        assert mode in ['large', 'small']
+        if output_widths is None:
+            output_widths = [16, 16, 24, 40, 80, 112, 160, 960, 1280]
+        if use_squeeze_excites is None:
+            use_squeeze_excites = [False, False, True, False, True, True, True, True, True]
+        if use_hard_swishes is None:
+            use_hard_swishes = [True, False, False, True, True, True, True, True, True]
+        if strides is None:
+            strides = [1, 1, 1, 2, 1, 1, 1, 1, 1]
         
-        layer_channel_sizes = [16, 16, 24, 40, 80, 112, 160, 960, 1280]
-        widths = [_make_divisible(x * width_mult, 8) for x in layer_channel_sizes]
-        # building first layer
-        # self.first_conv = conv_3x3_bn(3, first_inverted_residual_input_channels, 1)
+        output_widths = [_make_divisible(x * width_mult, 8) for x in output_widths]
         self.first_conv = nn.Sequential(
-            nn.Conv2d(input_data_channels, widths[0],
-                      kernel_size=3, stride=1, padding=same_padding(3), bias=False),
-            nn.BatchNorm2d(widths[0]),
-            nn.Hardswish(inplace=True)
+            nn.Conv2d(input_data_channels, output_widths[0],
+                      kernel_size=3, stride=strides[0], padding=same_padding(3), bias=False),
+            nn.BatchNorm2d(output_widths[0]),
+            activation_function(use_hard_swishes[0])
         )
-        self.first_inverted_residual = FirstInvertedResidual(widths[0], widths[1], 1)
+        self.first_inverted_residual = FirstInvertedResidual(output_widths[0], output_widths[1], strides[1])
         # building inverted residual blocks
-        for k, t, c, use_se, use_hs, s in self.cfgs:
-            output_channel = _make_divisible(c * width_mult, 8)
-            exp_size = _make_divisible(first_inverted_residual_input_channels * t, 8)
-            layers.append(DynamicInvertedResidual(first_inverted_residual_input_channels, exp_size, output_channel, k, s, use_se, use_hs))
-            first_inverted_residual_input_channels = output_channel
-        self.features = nn.Sequential(*layers)
-        # building last several layers
-        self.conv = conv_1x1_bn(first_inverted_residual_input_channels, exp_size)
+        num_pre_block_layers = 2
+        num_post_block_layers = 2
+        self.blocks = []
+        for i in range(num_pre_block_layers, len(output_widths) - num_post_block_layers):
+            self.blocks.append(DynamicBlock(
+                in_channels=output_widths[i - 1],
+                out_channels=output_widths[i],
+                max_kernel_size=max_kernel_size,
+                max_expansion_ratio=max_expansion_ratio,
+                stride=strides[i],
+                use_se=use_squeeze_excites[i],
+                use_hs=use_hard_swishes[i])
+            )
+
+        self.final_conv = nn.Sequential(
+            nn.Conv2d(output_widths[-3], output_widths[-2], 1, strides[-2], 0, bias=False),
+            nn.BatchNorm2d(output_widths[-2]),
+            activation_function(use_hard_swishes[-2])
+        )
+
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        output_channel = {'large': 1280, 'small': 1024}
-        output_channel = _make_divisible(output_channel[mode] * width_mult, 8) if width_mult > 1.0 else output_channel[mode]
         self.classifier = nn.Sequential(
-            nn.Linear(exp_size, output_channel),
-            nn.Hardswish(inplace=True),
+            nn.Linear(output_widths[-2], output_widths[-1]),
+            activation_function(use_hard_swishes[-1]),
             nn.Dropout(0.2),
-            nn.Linear(output_channel, num_classes)
+            nn.Linear(output_widths[-1], num_classes)
         )
         
         self._initialize_weights()
     
-    def forward(self, x):
-        x = self.features(x)
-        x = self.conv(x)
-        x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
-        x = self.classifier(x)
-        return x
+    def forward(self, x, depths, kernel_sizes, expansion_ratios):
+        y = self.first_conv(x)
+        y = self.first_inverted_residual(y)
+        for i in range(len(self.blocks)):
+            y = self.blocks[i].forward(y, depths[i], kernel_sizes[i], expansion_ratios)
+        y = self.final_conv(y)
+        y = self.avgpool(y).view(y.size[0], -1)
+        y = self.classifier(y)
+        
+        return y
     
     def _initialize_weights(self):
         for m in self.modules():
@@ -319,46 +323,67 @@ class MobileNetV3OFA(nn.Module):
                 m.bias.data.zero_()
 
 
-def mobilenetv3_large(**kwargs):
-    """
-    Constructs a MobileNetV3-Large model
-    """
-    cfgs = [
-        # k, t, c, SE, HS, s
-        [3,   1,  16, 0, 0, 1],
-        [3,   4,  24, 0, 0, 2],
-        [3,   3,  24, 0, 0, 1],
-        [5,   3,  40, 1, 0, 2],
-        [5,   3,  40, 1, 0, 1],
-        [5,   3,  40, 1, 0, 1],
-        [3,   6,  80, 0, 1, 2],
-        [3, 2.5,  80, 0, 1, 1],
-        [3, 2.3,  80, 0, 1, 1],
-        [3, 2.3,  80, 0, 1, 1],
-        [3,   6, 112, 1, 1, 1],
-        [3,   6, 112, 1, 1, 1],
-        [5,   6, 160, 1, 1, 2],
-        [5,   6, 160, 1, 1, 1],
-        [5,   6, 160, 1, 1, 1]
-    ]
-    return MobileNetV3(cfgs, mode='large', **kwargs)
+# def mobilenetv3_large(**kwargs):
+#     """
+#     Constructs a MobileNetV3-Large model
+#     """
+#     cfgs = [
+#         # k, t, c, SE, HS, s
+#         [3,   1,  16, 0, 0, 1],
+#         [3,   4,  24, 0, 0, 2],
+#         [3,   3,  24, 0, 0, 1],
+#         [5,   3,  40, 1, 0, 2],
+#         [5,   3,  40, 1, 0, 1],
+#         [5,   3,  40, 1, 0, 1],
+#         [3,   6,  80, 0, 1, 2],
+#         [3, 2.5,  80, 0, 1, 1],
+#         [3, 2.3,  80, 0, 1, 1],
+#         [3, 2.3,  80, 0, 1, 1],
+#         [3,   6, 112, 1, 1, 1],
+#         [3,   6, 112, 1, 1, 1],
+#         [5,   6, 160, 1, 1, 2],
+#         [5,   6, 160, 1, 1, 1],
+#         [5,   6, 160, 1, 1, 1]
+#     ]
+#     return MobileNetV3(cfgs, mode='large', **kwargs)
+#
+#
+# def mobilenetv3_small(**kwargs):
+#     """
+#     Constructs a MobileNetV3-Small model
+#     """
+#     cfgs = [
+#         # k, t, c, SE, HS, s
+#         [3,    1,  16, 1, 0, 1],
+#         [3,  4.5,  24, 0, 0, 1],
+#         [3, 3.67,  24, 0, 0, 1],
+#         [5,    4,  40, 1, 1, 2],
+#         [5,    6,  40, 1, 1, 1],
+#         [5,    3,  48, 1, 1, 1],
+#         [5,    3,  48, 1, 1, 1],
+#         [5,    6,  96, 1, 1, 1],
+#         [5,    6,  96, 1, 1, 1],
+#     ]
+#
+#     return MobileNetV3(cfgs, mode='small', **kwargs)
 
-
-def mobilenetv3_small(**kwargs):
-    """
-    Constructs a MobileNetV3-Small model
-    """
-    cfgs = [
-        # k, t, c, SE, HS, s
-        [3,    1,  16, 1, 0, 1],
-        [3,  4.5,  24, 0, 0, 1],
-        [3, 3.67,  24, 0, 0, 1],
-        [5,    4,  40, 1, 1, 2],
-        [5,    6,  40, 1, 1, 1],
-        [5,    3,  48, 1, 1, 1],
-        [5,    3,  48, 1, 1, 1],
-        [5,    6,  96, 1, 1, 1],
-        [5,    6,  96, 1, 1, 1],
-    ]
+def mobilenetv3_ofa(**kwargs):
+    output_widths = [16, 16, 24, 40, 80, 112, 160, 960, 1280]
+    use_squeeze_excite = [0, 0, 1, 0, 1, 1, 1, 1, 1]
+    use_hard_swish = [0, 0, 0, 1, 1, 1, 1, 1, 1]
+    stride = [1, 1, 1, 2, 1, 1, 1, 1, 1]
     
-    return MobileNetV3(cfgs, mode='small', **kwargs)
+    cfgs = [
+        # c, SE, HS, s
+        [16, 0, 0, 1],
+        [16, 0, 0, 1],
+        [24, 1, 0, 1],
+        [40, 0, 1, 2],
+        [80, 1, 1, 1],
+        [112, 1, 1, 1],
+        [160, 1, 1, 1],
+        [960, 1, 1, 1],
+        [1280, 1, 1, 1],
+    ]
+
+    return MobileNetV3OFA(cfgs, **kwargs)
