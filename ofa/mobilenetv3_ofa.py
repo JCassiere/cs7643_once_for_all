@@ -82,28 +82,21 @@ class DynamicSELayer(nn.Module):
         )
         # SE squeeze will have the same number of inputs as the excite has outputs,
         # so reorganize the inputs the same way
+        # don't reorder the bias here, since the bias is added to the output
         self.squeeze.weight.data = torch.index_select(
             self.squeeze.weight.data,
-            dim=1,
-            index=sorted_indices
-        )
-        self.squeeze.bias.data = torch.index_select(
-            self.squeeze.bias.data,
             dim=1,
             index=sorted_indices
         )
         # Then reorganize the squeeze-excite "hidden" channels according to
         # their importances
         # do this by measuring importance of the input channels to the excitation layer
-        importance = torch.sum(torch.abs(self.excite.weight), dim=(0, 2, 3))
+        importance = torch.sum(torch.abs(self.excite.weight), dim=0)
         _, internal_sorted_indices = torch.sort(importance, dim=0, descending=True)
+        # don't reorder the excite bias, since it is added to the output
+        # and we are reordering the input channels here
         self.excite.weight.data = torch.index_select(
             self.excite.weight.data,
-            dim=1,
-            index=internal_sorted_indices
-        )
-        self.excite.bias.data = torch.index_select(
-            self.excite.bias.data,
             dim=1,
             index=internal_sorted_indices
         )
@@ -117,6 +110,12 @@ class DynamicSELayer(nn.Module):
             dim=0,
             index=internal_sorted_indices
         )
+        
+    def initialize_weights(self):
+        torch.nn.init.xavier_uniform_(self.squeeze.weight)
+        torch.nn.init.zeros_(self.squeeze.bias)
+        torch.nn.init.xavier_uniform_(self.excite.weight)
+        torch.nn.init.zeros_(self.excite.bias)
 
 
 class DynamicBatchNorm(nn.Module):
@@ -164,6 +163,10 @@ class DynamicBatchNorm(nn.Module):
             index=sorted_indices
         )
 
+    def initialize_weights(self):
+        torch.nn.init.ones_(self.base_batch_norm.weight)
+        torch.nn.init.zeros_(self.base_batch_norm.bias)
+
 
 class DynamicDepthwiseConv(nn.Module):
     def __init__(self, channels, max_kernel_size, stride=1):
@@ -176,21 +179,22 @@ class DynamicDepthwiseConv(nn.Module):
     
     def forward(self, x: torch.Tensor, kernel_size, channels):
         # TODO - don't copy weights - mask somehow?
-        (n, c, _, _) = self.base_conv.weight.shape
+        (_, c, _, _) = self.base_conv.weight.shape
         if kernel_size == 7:
-            weights = self.base_conv.weight[:channels, :channels, :, :]
+            weights = self.base_conv.weight[:channels, :, :, :]
         # lay out the kernels in 1D vectors
         # perform matrix multiplication of these laid out kernels by the appropriate transformation
         # matrices, then reshape the product
         # for example, for a 5x5 kernel, lay it out to be 1x25
         # then multiply by the 25x25 transformation matrix to get a transformed 1x25 matrix
         # then view that as a 5x5 matrix, which is your kernel
+        
         elif kernel_size == 5:
-            weights = self.base_conv.weight[:channels, :channels, 1:6, 1:6].view(n, c, 1, 25)
-            weights = torch.matmul(weights, self.five_by_five_transformation).view(n, c, 5, 5)
+            weights = self.base_conv.weight[:channels, :, 1:6, 1:6].reshape(channels, 1, 1, 25)
+            weights = torch.matmul(weights, self.five_by_five_transformation).view(channels, c, 5, 5)
         elif kernel_size == 3:
-            weights = self.base_conv.weight[:channels, :channels, 2:5, 2:5].view(n, c, 1, 9)
-            weights = torch.matmul(weights, self.three_by_three_transformation).view(n, c, 3, 3)
+            weights = self.base_conv.weight[:channels, :, 2:5, 2:5].reshape(channels, 1, 1, 9)
+            weights = torch.matmul(weights, self.three_by_three_transformation).view(channels, c, 3, 3)
         else:
             raise ValueError("Invalid kernel size supplied to DynamicConvLayer")
         
@@ -205,6 +209,11 @@ class DynamicDepthwiseConv(nn.Module):
             dim=dim,
             index=sorted_indices
         )
+
+    def initialize_weights(self):
+        torch.nn.init.xavier_uniform_(self.base_conv.weight)
+        torch.nn.init.xavier_uniform_(self.five_by_five_transformation)
+        torch.nn.init.xavier_uniform_(self.three_by_three_transformation)
 
 
 class DynamicConv(nn.Module):
@@ -227,6 +236,9 @@ class DynamicConv(nn.Module):
             index=sorted_indices
         )
 
+    def initialize_weights(self):
+        torch.nn.init.xavier_uniform_(self.base_conv.weight)
+        
 
 class FirstInvertedResidual(nn.Module):
     '''
@@ -241,10 +253,10 @@ class FirstInvertedResidual(nn.Module):
         hidden_channels = _make_divisible(in_channels, 8)
         
         self.conv = nn.Sequential(
-            nn.Conv2d(hidden_channels, hidden_channels, kernel_size, stride, padding=same_padding(kernel_size)),
+            nn.Conv2d(hidden_channels, hidden_channels, kernel_size, stride, padding=same_padding(kernel_size), bias=False),
             nn.BatchNorm2d(hidden_channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(hidden_channels, out_channels, 1, 1),
+            nn.Conv2d(hidden_channels, out_channels, 1, 1, bias=False),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
@@ -255,6 +267,15 @@ class FirstInvertedResidual(nn.Module):
         else:
             return self.conv(x)
 
+    def initialize_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Conv2d):
+                torch.nn.init.xavier_uniform_(module.weight)
+            elif isinstance(module, nn.BatchNorm2d):
+                torch.nn.init.ones_(module.weight)
+                torch.nn.init.zeros_(module.bias)
+                module.bias.data.zero_()
+        
 
 class DynamicInvertedResidual(nn.Module):
     def __init__(self, in_channels, out_channels, max_kernel_size=7,
@@ -308,6 +329,16 @@ class DynamicInvertedResidual(nn.Module):
             
         self.bottleneck_norm.reorganize_weights(sorted_indices)
         self.bottleneck.reorganize_channels(sorted_indices, 0)
+        
+    def initialize_weights(self):
+        self.bottleneck.initialize_weights()
+        self.bottleneck_norm.initialize_weights()
+        self.depthwise_convolution.initialize_weights()
+        self.depthwise_norm.initialize_weights()
+        if self.use_se:
+            self.se_layer.initialize_weights()
+        self.pointwise_conv.initialize_weights()
+        self.pointwise_norm.initialize_weights()
 
 
 class DynamicBlock(nn.Module):
@@ -328,6 +359,14 @@ class DynamicBlock(nn.Module):
             y = self.layers[i].forward(y, kernel_sizes[i], expansion_ratios[i])
         return y
     
+    def reorder_channels(self):
+        for layer in self.layers:
+            layer.reorder_channels()
+            
+    def initialize_weights(self):
+        for layer in self.layers:
+            layer.initialize_weights()
+    
     
 class MobileNetV3OFA(nn.Module):
     def __init__(self, output_widths=None, use_squeeze_excites=None,
@@ -335,7 +374,6 @@ class MobileNetV3OFA(nn.Module):
                  width_mult=1., max_kernel_size=7, max_expansion_ratio=6):
         super(MobileNetV3OFA, self).__init__()
 
-        # setting of inverted residual blocks
         if output_widths is None:
             output_widths = [16, 16, 24, 40, 80, 112, 160, 960, 1280]
         if use_squeeze_excites is None:
@@ -353,7 +391,6 @@ class MobileNetV3OFA(nn.Module):
             activation_function(use_hard_swishes[0])
         )
         self.first_inverted_residual = FirstInvertedResidual(output_widths[0], output_widths[1], strides[1])
-        # building inverted residual blocks
         num_pre_block_layers = 2
         num_post_block_layers = 2
         self.blocks = []
@@ -382,7 +419,7 @@ class MobileNetV3OFA(nn.Module):
             nn.Linear(output_widths[-1], num_classes)
         )
         
-        self._initialize_weights()
+        self.initialize_weights()
     
     def forward(self, x, depths, kernel_sizes, expansion_ratios):
         y = self.first_conv(x)
@@ -395,63 +432,33 @@ class MobileNetV3OFA(nn.Module):
         
         return y
     
-    def _initialize_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                torch.nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    torch.nn.init.zeros_(m.bias)
-            elif isinstance(m, nn.BatchNorm2d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
-            elif isinstance(m, nn.Linear):
-                m.weight.data.normal_(0, 0.01)
-                m.bias.data.zero_()
+    def reorder_channels(self):
+        for i in range(len(self.blocks)):
+            self.blocks[i].reorder_channels()
+    
+    def initialize_layer(self, layer):
+        if isinstance(layer, nn.Conv2d):
+            torch.nn.init.xavier_uniform_(layer.weight)
+            if layer.bias is not None:
+                torch.nn.init.zeros_(layer.bias)
+        elif isinstance(layer, nn.BatchNorm2d):
+            layer.weight.data.fill_(1)
+            layer.bias.data.zero_()
+        elif isinstance(layer, nn.Linear):
+            layer.weight.data.normal_(0, 0.01)
+            layer.bias.data.zero_()
+        
+    def initialize_weights(self):
+        for layer in self.first_conv.modules():
+            self.initialize_layer(layer)
+        self.first_inverted_residual.initialize_weights()
+        for block in self.blocks:
+            block.initialize_weights()
+        for layer in self.final_conv.modules():
+            self.initialize_layer(layer)
+        for layer in self.classifier.modules():
+            self.initialize_layer(layer)
 
-
-# def mobilenetv3_large(**kwargs):
-#     """
-#     Constructs a MobileNetV3-Large model
-#     """
-#     cfgs = [
-#         # k, t, c, SE, HS, s
-#         [3,   1,  16, 0, 0, 1],
-#         [3,   4,  24, 0, 0, 2],
-#         [3,   3,  24, 0, 0, 1],
-#         [5,   3,  40, 1, 0, 2],
-#         [5,   3,  40, 1, 0, 1],
-#         [5,   3,  40, 1, 0, 1],
-#         [3,   6,  80, 0, 1, 2],
-#         [3, 2.5,  80, 0, 1, 1],
-#         [3, 2.3,  80, 0, 1, 1],
-#         [3, 2.3,  80, 0, 1, 1],
-#         [3,   6, 112, 1, 1, 1],
-#         [3,   6, 112, 1, 1, 1],
-#         [5,   6, 160, 1, 1, 2],
-#         [5,   6, 160, 1, 1, 1],
-#         [5,   6, 160, 1, 1, 1]
-#     ]
-#     return MobileNetV3(cfgs, mode='large', **kwargs)
-#
-#
-# def mobilenetv3_small(**kwargs):
-#     """
-#     Constructs a MobileNetV3-Small model
-#     """
-#     cfgs = [
-#         # k, t, c, SE, HS, s
-#         [3,    1,  16, 1, 0, 1],
-#         [3,  4.5,  24, 0, 0, 1],
-#         [3, 3.67,  24, 0, 0, 1],
-#         [5,    4,  40, 1, 1, 2],
-#         [5,    6,  40, 1, 1, 1],
-#         [5,    3,  48, 1, 1, 1],
-#         [5,    3,  48, 1, 1, 1],
-#         [5,    6,  96, 1, 1, 1],
-#         [5,    6,  96, 1, 1, 1],
-#     ]
-#
-#     return MobileNetV3(cfgs, mode='small', **kwargs)
 
 def mobilenetv3_ofa(**kwargs):
     return MobileNetV3OFA(**kwargs)
