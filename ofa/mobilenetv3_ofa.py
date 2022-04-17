@@ -373,7 +373,6 @@ class MobileNetV3OFA(nn.Module):
                  use_hard_swishes=None, strides=None, input_data_channels=3, num_classes=1000,
                  width_mult=1., max_kernel_size=7, max_expansion_ratio=6):
         super(MobileNetV3OFA, self).__init__()
-
         if output_widths is None:
             output_widths = [16, 16, 24, 40, 80, 112, 160, 960, 1280]
         if use_squeeze_excites is None:
