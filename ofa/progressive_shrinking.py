@@ -93,17 +93,21 @@ def progressive_shrinking(train_loader, test_loader, net, **kwargs):
     elastic_width_epochs_stage_2 = kwargs.get("elastic_width_epochs_stage_2", 125)
     elastic_width_lr_stage_2 = kwargs.get("elastic_width_lr_stage_2", 0.24)
     
-    default_depths = [max_depth for _ in range(num_blocks)]
-    default_kernels = [[7 for _ in range(4)] for _ in range(num_blocks)]
-    default_expansion_ratios = [[max_expansion_ratio for _ in range(4)] for _ in range(num_blocks)]
+    # default_depths = [max_depth for _ in range(num_blocks)]
+    # default_kernels = [[7 for _ in range(4)] for _ in range(num_blocks)]
+    # default_expansion_ratios = [[max_expansion_ratio for _ in range(4)] for _ in range(num_blocks)]
+    depth_choices = [max_depth]
+    kernel_choices = [7]
+    expansion_ratio_choices = [max_expansion_ratio]
     # big network training
     train_loop(net, train_loader, test_loader, lr=base_net_lr, epochs=base_net_epochs,
-               num_blocks=num_blocks, depth_choices=default_depths, kernel_choices=default_kernels,
-               expansion_ratio_choices=default_expansion_ratios)
+               num_blocks=num_blocks, depth_choices=depth_choices, kernel_choices=kernel_choices,
+               expansion_ratio_choices=expansion_ratio_choices)
         
     # elastic kernel
+    # kernel_choices = [7, 5, 3]
     # train_loop(net, train_loader, test_loader, lr=elastic_kernel_lr, epochs=elastic_kernel_epochs,
-    #            num_blocks=num_blocks, depth_choices=default_depths, kernel_choices=[7, 5, 3],
+    #            num_blocks=num_blocks, depth_choices=default_depths, kernel_choices=kernel_choices,
     #            expansion_ratio_choices=default_expansion_ratios)
     
     # elastic depth stage 1
@@ -111,10 +115,9 @@ def progressive_shrinking(train_loader, test_loader, net, **kwargs):
     if max_depth - 1 > 0:
         depth_choices.append(max_depth - 1)
     # kernel_choices = [7, 5, 3]
-    kernel_choices = default_kernels
     train_loop(net, train_loader, test_loader, lr=elastic_depth_lr_stage_1, epochs=elastic_depth_epochs_stage_1,
                num_blocks=num_blocks, depth_choices=depth_choices, kernel_choices=kernel_choices,
-               expansion_ratio_choices=default_expansion_ratios)
+               expansion_ratio_choices=expansion_ratio_choices)
     
 
     # elastic depth stage 2
@@ -125,10 +128,9 @@ def progressive_shrinking(train_loader, test_loader, net, **kwargs):
         else:
             break
     # kernel_choices = [7, 5, 3]
-    kernel_choices = default_kernels
     train_loop(net, train_loader, test_loader, lr=elastic_depth_lr_stage_2, epochs=elastic_depth_epochs_stage_2,
                num_blocks=num_blocks, depth_choices=depth_choices, kernel_choices=kernel_choices,
-               expansion_ratio_choices=default_expansion_ratios)
+               expansion_ratio_choices=expansion_ratio_choices)
         
     # elastic width stage 1
     net.reorder_channels()
@@ -143,7 +145,6 @@ def progressive_shrinking(train_loader, test_loader, net, **kwargs):
         expansion_ratio_choices.append(max_expansion_ratio - 2)
     
     # kernel_choices = [7, 5, 3]
-    kernel_choices = default_kernels
     train_loop(net, train_loader, test_loader, lr=elastic_width_lr_stage_1, epochs=elastic_width_epochs_stage_1,
                num_blocks=num_blocks, depth_choices=depth_choices, kernel_choices=kernel_choices,
                expansion_ratio_choices=expansion_ratio_choices)
@@ -164,7 +165,6 @@ def progressive_shrinking(train_loader, test_loader, net, **kwargs):
             break
     
     # kernel_choices = [7, 5, 3]
-    kernel_choices = default_kernels
     train_loop(net, train_loader, test_loader, lr=elastic_width_lr_stage_2, epochs=elastic_width_epochs_stage_2,
                num_blocks=num_blocks, depth_choices=depth_choices, kernel_choices=kernel_choices,
                expansion_ratio_choices=expansion_ratio_choices)

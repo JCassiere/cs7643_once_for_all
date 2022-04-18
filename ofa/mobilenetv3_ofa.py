@@ -179,7 +179,6 @@ class DynamicDepthwiseConv(nn.Module):
     
     def forward(self, x: torch.Tensor, kernel_size, channels):
         # TODO - don't copy weights - mask somehow?
-        (_, c, _, _) = self.base_conv.weight.shape
         if kernel_size == 7:
             weights = self.base_conv.weight[:channels, :, :, :]
         # lay out the kernels in 1D vectors
@@ -189,12 +188,13 @@ class DynamicDepthwiseConv(nn.Module):
         # then multiply by the 25x25 transformation matrix to get a transformed 1x25 matrix
         # then view that as a 5x5 matrix, which is your kernel
         
+        # TODO - I think to use kernel size=3, you first need to go from 7 to 5, then 5 to 3
         elif kernel_size == 5:
-            weights = self.base_conv.weight[:channels, :, 1:6, 1:6].reshape(channels, 1, 1, 25)
-            weights = torch.matmul(weights, self.five_by_five_transformation).view(channels, c, 5, 5)
+            weights = self.base_conv.weight[:channels, :, 1:6, 1:6].contiguous().view(channels, 25)
+            weights = torch.matmul(weights, self.five_by_five_transformation).view(channels, 1, 5, 5)
         elif kernel_size == 3:
-            weights = self.base_conv.weight[:channels, :, 2:5, 2:5].reshape(channels, 1, 1, 9)
-            weights = torch.matmul(weights, self.three_by_three_transformation).view(channels, c, 3, 3)
+            weights = self.base_conv.weight[:channels, :, 2:5, 2:5].contiguous().view(channels, 9)
+            weights = torch.matmul(weights, self.three_by_three_transformation).view(channels, 1, 3, 3)
         else:
             raise ValueError("Invalid kernel size supplied to DynamicConvLayer")
         
