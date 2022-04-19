@@ -1,14 +1,14 @@
 import numpy as np
 import torch
 
-def train_loop(net, train_loader, test_loader, lr, epochs, num_blocks,
+def train_loop(net, train_loader, test_loader, lr, epochs,
                depth_choices, kernel_choices, expansion_ratio_choices):
     optimizer = torch.optim.SGD(net.parameters(), lr=lr, weight_decay=1e-5, momentum=0.9)
     criterion = torch.nn.CrossEntropyLoss()
     for epoch in range(epochs):
         net.train()
         for (idx, batch) in enumerate(train_loader):
-            config = get_network_config(num_blocks, kernel_choices, depth_choices, expansion_ratio_choices)
+            config = get_network_config(net.num_blocks, kernel_choices, depth_choices, expansion_ratio_choices)
             depths = config['depths']
             kernels = config['kernel_sizes']
             expansion_ratios = config['expansion_ratios']
@@ -23,7 +23,7 @@ def train_loop(net, train_loader, test_loader, lr, epochs, num_blocks,
         test_correct = []
         with torch.no_grad():
             for (idx, batch) in enumerate(test_loader):
-                config = get_network_config(num_blocks, kernel_choices, depth_choices, expansion_ratio_choices)
+                config = get_network_config(net.num_blocks, kernel_choices, depth_choices, expansion_ratio_choices)
                 depths = config['depths']
                 kernels = config['kernel_sizes']
                 expansion_ratios = config['expansion_ratios']
@@ -52,32 +52,7 @@ def get_network_config(num_blocks, kernel_choices, depth_choices, expansion_rati
         
     return config
     
-def training_stage(net, optimizer, train_loader, test_loader, epochs,
-                   depths, kernels, expansion_ratios):
-    criterion = torch.nn.CrossEntropyLoss()
-    for epoch in range(epochs):
-        net.train()
-        for (idx, batch) in enumerate(train_loader):
-            optimizer.zero_grad()
-            images, targets = batch
-            output = net.forward(images, depths, kernels, expansion_ratios)
-            loss = criterion(output, targets)
-            loss.backward()
-            optimizer.step()
-        net.eval()
-        test_correct = []
-        with torch.no_grad():
-            for (idx, batch) in enumerate(test_loader):
-                images, targets = batch
-                output = net.forward(images, depths, kernels, expansion_ratios)
-                pred = torch.argmax(output, dim=1)
-                test_correct.append((pred == targets).int())
-            test_correct = torch.cat(test_correct, dim=-1)
-            accuracy = torch.sum(test_correct) / test_correct.shape[0]
-        print("Epoch {} accuracy: {}".format(epoch, accuracy))
-    
 def progressive_shrinking(train_loader, test_loader, net, **kwargs):
-    num_blocks = kwargs.get("num_blocks", 5)
     max_expansion_ratio = kwargs.get("max_expansion_ratio", 6)
     max_depth = kwargs.get("max_depth", 4)
     base_net_epochs = kwargs.get("base_net_epochs", 180)
@@ -93,23 +68,20 @@ def progressive_shrinking(train_loader, test_loader, net, **kwargs):
     elastic_width_epochs_stage_2 = kwargs.get("elastic_width_epochs_stage_2", 125)
     elastic_width_lr_stage_2 = kwargs.get("elastic_width_lr_stage_2", 0.24)
     
-    # default_depths = [max_depth for _ in range(num_blocks)]
-    # default_kernels = [[7 for _ in range(4)] for _ in range(num_blocks)]
-    # default_expansion_ratios = [[max_expansion_ratio for _ in range(4)] for _ in range(num_blocks)]
     depth_choices = [max_depth]
     kernel_choices = [7]
     expansion_ratio_choices = [max_expansion_ratio]
     # big network training
     train_loop(net, train_loader, test_loader, lr=base_net_lr, epochs=base_net_epochs,
-               num_blocks=num_blocks, depth_choices=depth_choices, kernel_choices=kernel_choices,
+               depth_choices=depth_choices, kernel_choices=kernel_choices,
                expansion_ratio_choices=expansion_ratio_choices)
-    torch.save(net.state_dict(),'./checkpoint/big_network.pt')
+    torch.save(net.state_dict(), './checkpoint/big_network.pt')
         
     # elastic kernel
-    # kernel_choices = [7, 5, 3]
-    # train_loop(net, train_loader, test_loader, lr=elastic_kernel_lr, epochs=elastic_kernel_epochs,
-    #            num_blocks=num_blocks, depth_choices=default_depths, kernel_choices=kernel_choices,
-    #            expansion_ratio_choices=default_expansion_ratios)
+    kernel_choices = [7, 5, 3]
+    train_loop(net, train_loader, test_loader, lr=elastic_kernel_lr, epochs=elastic_kernel_epochs,
+               depth_choices=depth_choices, kernel_choices=kernel_choices,
+               expansion_ratio_choices=expansion_ratio_choices)
     
     # elastic depth stage 1
     depth_choices = [max_depth]
@@ -117,9 +89,9 @@ def progressive_shrinking(train_loader, test_loader, net, **kwargs):
         depth_choices.append(max_depth - 1)
     # kernel_choices = [7, 5, 3]
     train_loop(net, train_loader, test_loader, lr=elastic_depth_lr_stage_1, epochs=elastic_depth_epochs_stage_1,
-               num_blocks=num_blocks, depth_choices=depth_choices, kernel_choices=kernel_choices,
+               depth_choices=depth_choices, kernel_choices=kernel_choices,
                expansion_ratio_choices=expansion_ratio_choices)
-    torch.save(net.state_dict(),'./checkpoint/elastic_depth_stage1.pt')
+    torch.save(net.state_dict(), './checkpoint/elastic_depth_stage1.pt')
 
     # elastic depth stage 2
     depth_choices = [max_depth]
@@ -130,9 +102,9 @@ def progressive_shrinking(train_loader, test_loader, net, **kwargs):
             break
     # kernel_choices = [7, 5, 3]
     train_loop(net, train_loader, test_loader, lr=elastic_depth_lr_stage_2, epochs=elastic_depth_epochs_stage_2,
-               num_blocks=num_blocks, depth_choices=depth_choices, kernel_choices=kernel_choices,
+               depth_choices=depth_choices, kernel_choices=kernel_choices,
                expansion_ratio_choices=expansion_ratio_choices)
-    torch.save(net.state_dict(),'./checkpoint/elastic_depth_stage2.pt')
+    torch.save(net.state_dict(), './checkpoint/elastic_depth_stage2.pt')
         
     # elastic width stage 1
     net.reorder_channels()
@@ -148,9 +120,9 @@ def progressive_shrinking(train_loader, test_loader, net, **kwargs):
     
     # kernel_choices = [7, 5, 3]
     train_loop(net, train_loader, test_loader, lr=elastic_width_lr_stage_1, epochs=elastic_width_epochs_stage_1,
-               num_blocks=num_blocks, depth_choices=depth_choices, kernel_choices=kernel_choices,
+               depth_choices=depth_choices, kernel_choices=kernel_choices,
                expansion_ratio_choices=expansion_ratio_choices)
-    torch.save(net.state_dict(),'./checkpoint/elastic_width_stage1.pt')
+    torch.save(net.state_dict(), './checkpoint/elastic_width_stage1.pt')
         
     # elastic width stage 2
     net.reorder_channels()
@@ -169,6 +141,6 @@ def progressive_shrinking(train_loader, test_loader, net, **kwargs):
     
     # kernel_choices = [7, 5, 3]
     train_loop(net, train_loader, test_loader, lr=elastic_width_lr_stage_2, epochs=elastic_width_epochs_stage_2,
-               num_blocks=num_blocks, depth_choices=depth_choices, kernel_choices=kernel_choices,
+               depth_choices=depth_choices, kernel_choices=kernel_choices,
                expansion_ratio_choices=expansion_ratio_choices)
-    torch.save(net.state_dict(),'./checkpoint/elastic_width_stage2.pt')
+    torch.save(net.state_dict(), './checkpoint/elastic_width_stage2.pt')

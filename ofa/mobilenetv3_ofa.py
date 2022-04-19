@@ -4,6 +4,8 @@ Uses https://github.com/d-li14/mobilenetv3.pytorch as starting point
 Also uses https://github.com/leaderj1001/MobileNetV3-Pytorch for reference
 
 Also https://github.com/zeiss-microscopy/BSConv/blob/master
+
+Weight standardization - https://github.com/joe-siyuan-qiao/WeightStandardization
 """
 
 import torch.nn as nn
@@ -179,8 +181,8 @@ class DynamicDepthwiseConv(nn.Module):
     
     def forward(self, x: torch.Tensor, kernel_size, channels):
         # TODO - don't copy weights - mask somehow?
-        if kernel_size == 7:
-            weights = self.base_conv.weight[:channels, :, :, :]
+        # if kernel_size == 7:
+        weights = self.base_conv.weight[:channels, :, :, :]
         # lay out the kernels in 1D vectors
         # perform matrix multiplication of these laid out kernels by the appropriate transformation
         # matrices, then reshape the product
@@ -189,16 +191,29 @@ class DynamicDepthwiseConv(nn.Module):
         # then view that as a 5x5 matrix, which is your kernel
         
         # TODO - I think to use kernel size=3, you first need to go from 7 to 5, then 5 to 3
-        elif kernel_size == 5:
-            weights = self.base_conv.weight[:channels, :, 1:6, 1:6].contiguous().view(channels, 25)
+        if kernel_size <= 5:
+            weights = weights[:channels, :, 1:6, 1:6].contiguous().view(channels, 25)
             weights = torch.matmul(weights, self.five_by_five_transformation).view(channels, 1, 5, 5)
-        elif kernel_size == 3:
-            weights = self.base_conv.weight[:channels, :, 2:5, 2:5].contiguous().view(channels, 9)
+        if kernel_size == 3:
+            weights = weights[:channels, :, 1:4, 1:4].contiguous().view(channels, 9)
             weights = torch.matmul(weights, self.three_by_three_transformation).view(channels, 1, 3, 3)
-        else:
-            raise ValueError("Invalid kernel size supplied to DynamicConvLayer")
+        # elif kernel_size == 5:
+        #     weights = self.base_conv.weight[:channels, :, 1:6, 1:6].contiguous().view(channels, 25)
+        #     weights = torch.matmul(weights, self.five_by_five_transformation).view(channels, 1, 5, 5)
+        # elif kernel_size == 3:
+        #     weights = self.base_conv.weight[:channels, :, 2:5, 2:5].contiguous().view(channels, 9)
+        #     weights = torch.matmul(weights, self.three_by_three_transformation).view(channels, 1, 3, 3)
+        #
+        # else:
+        #     raise ValueError("Invalid kernel size supplied to DynamicConvLayer")
         
         # TODO - weight standardization?
+        weight_mean = weights.mean(dim=1, keepdim=True).mean(dim=2,
+                                  keepdim=True).mean(dim=3, keepdim=True)
+        weights = weights - weight_mean
+        std = weights.view(weights.size(0), -1).std(dim=1).view(-1, 1, 1, 1) + 1e-5
+        weights = weights / std.expand_as(weights)
+        
         return F.conv2d(x, weights, None,
                         self.base_conv.stride, padding=same_padding(kernel_size),
                         groups=channels)
@@ -392,8 +407,9 @@ class MobileNetV3OFA(nn.Module):
         self.first_inverted_residual = FirstInvertedResidual(output_widths[0], output_widths[1], strides[1])
         num_pre_block_layers = 2
         num_post_block_layers = 2
+        self.num_blocks = len(output_widths) - num_post_block_layers - num_pre_block_layers
         self.blocks = []
-        for i in range(num_pre_block_layers, len(output_widths) - num_post_block_layers):
+        for i in range(num_pre_block_layers, num_pre_block_layers + self.num_blocks):
             self.blocks.append(DynamicBlock(
                 in_channels=output_widths[i - 1],
                 out_channels=output_widths[i],
