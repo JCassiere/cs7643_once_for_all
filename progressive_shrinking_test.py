@@ -224,11 +224,11 @@ def test_progressive_shrinking():
 # TODO - try learning just with elastic depth and/or elastic width
 #  I think there is a bug with the elastic kernel
 if __name__ == "__main__":
-    train_mobilenetv3_cifar100()
+    # train_mobilenetv3_cifar100()
     # cProfile.run('train_mobilenetv3ofa_cifar100()', 'profile')
     # train_mobilenetv3ofa_cifar100()
     # learn_on_small_kernel_only()
     
     # 1 epoch/30s on colab
-    # test_progressive_shrinking()
+    test_progressive_shrinking()
     
