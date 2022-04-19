@@ -119,7 +119,7 @@ def progressive_shrinking(train_loader, test_loader, net, **kwargs):
     train_loop(net, train_loader, test_loader, lr=elastic_depth_lr_stage_1, epochs=elastic_depth_epochs_stage_1,
                num_blocks=num_blocks, depth_choices=depth_choices, kernel_choices=kernel_choices,
                expansion_ratio_choices=expansion_ratio_choices)
-    torch.save(net.state_dict(),'./checkpoint/elastice_depth_stage1.pt')
+    torch.save(net.state_dict(),'./checkpoint/elastic_depth_stage1.pt')
 
     # elastic depth stage 2
     depth_choices = [max_depth]
@@ -132,7 +132,7 @@ def progressive_shrinking(train_loader, test_loader, net, **kwargs):
     train_loop(net, train_loader, test_loader, lr=elastic_depth_lr_stage_2, epochs=elastic_depth_epochs_stage_2,
                num_blocks=num_blocks, depth_choices=depth_choices, kernel_choices=kernel_choices,
                expansion_ratio_choices=expansion_ratio_choices)
-    torch.save(net.state_dict(),'./checkpoint/elastice_depth_stage2.pt')
+    torch.save(net.state_dict(),'./checkpoint/elastic_depth_stage2.pt')
         
     # elastic width stage 1
     net.reorder_channels()
@@ -150,7 +150,7 @@ def progressive_shrinking(train_loader, test_loader, net, **kwargs):
     train_loop(net, train_loader, test_loader, lr=elastic_width_lr_stage_1, epochs=elastic_width_epochs_stage_1,
                num_blocks=num_blocks, depth_choices=depth_choices, kernel_choices=kernel_choices,
                expansion_ratio_choices=expansion_ratio_choices)
-    torch.save(net.state_dict(),'./checkpoint/elastice_width_stage1.pt')
+    torch.save(net.state_dict(),'./checkpoint/elastic_width_stage1.pt')
         
     # elastic width stage 2
     net.reorder_channels()
@@ -171,4 +171,4 @@ def progressive_shrinking(train_loader, test_loader, net, **kwargs):
     train_loop(net, train_loader, test_loader, lr=elastic_width_lr_stage_2, epochs=elastic_width_epochs_stage_2,
                num_blocks=num_blocks, depth_choices=depth_choices, kernel_choices=kernel_choices,
                expansion_ratio_choices=expansion_ratio_choices)
-    torch.save(net.state_dict(),'./checkpoint/elastice_width_stage2.pt')
+    torch.save(net.state_dict(),'./checkpoint/elastic_width_stage2.pt')
