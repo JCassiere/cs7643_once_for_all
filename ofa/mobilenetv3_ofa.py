@@ -176,8 +176,8 @@ class DynamicDepthwiseConv(nn.Module):
         self.base_conv = nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=max_kernel_size,
                                    padding=same_padding(max_kernel_size), stride=stride,
                                    groups=channels, bias=False)
-        self.five_by_five_transformation = nn.Parameter(torch.zeros((25, 25)))
-        self.three_by_three_transformation = nn.Parameter(torch.zeros((9, 9)))
+        self.three_by_three_transformation = nn.Parameter(torch.eye(9))
+        self.five_by_five_transformation = nn.Parameter(torch.eye(25))
     
     def forward(self, x: torch.Tensor, kernel_size, channels):
         # TODO - don't copy weights - mask somehow?
@@ -192,11 +192,27 @@ class DynamicDepthwiseConv(nn.Module):
         
         # TODO - I think to use kernel size=3, you first need to go from 7 to 5, then 5 to 3
         if kernel_size <= 5:
-            weights = weights[:channels, :, 1:6, 1:6].contiguous().view(channels, 25)
-            weights = torch.matmul(weights, self.five_by_five_transformation).view(channels, 1, 5, 5)
+            # weights = weights[:channels, :, 1:6, 1:6].contiguous().view(channels, 25)
+            weights = weights[:channels, :, 1:6, 1:6]
+            weights = weights.contiguous()
+            weights = weights.view(weights.size(0), weights.size(1), -1)
+            weights = weights.view(-1, weights.size(2))
+            # weights = weights.view(channels, 25)
+            weights = F.linear(weights, self.five_by_five_transformation)
+            weights = weights.view(channels, 1, 25)
+            weights = weights.view(channels, 1, 5, 5)
+            # weights = F.linear(weights, self.five_by_five_transformation).view(channels, 1, 5, 5)
         if kernel_size == 3:
-            weights = weights[:channels, :, 1:4, 1:4].contiguous().view(channels, 9)
-            weights = torch.matmul(weights, self.three_by_three_transformation).view(channels, 1, 3, 3)
+            # weights = weights[:channels, :, 1:4, 1:4].contiguous().view(channels, 9)
+            weights = weights[:channels, :, 1:4, 1:4]
+            weights = weights.contiguous()
+            weights = weights.view(weights.size(0), weights.size(1), -1)
+            weights = weights.view(-1, weights.size(2))
+            weights = F.linear(weights, self.three_by_three_transformation)
+            weights = weights.view(channels, 1, 9)
+            weights = weights.view(channels, 1, 3, 3)
+            
+            # weights = F.linear(weights, self.three_by_three_transformation).view(channels, 1, 3, 3)
         # elif kernel_size == 5:
         #     weights = self.base_conv.weight[:channels, :, 1:6, 1:6].contiguous().view(channels, 25)
         #     weights = torch.matmul(weights, self.five_by_five_transformation).view(channels, 1, 5, 5)
@@ -207,15 +223,15 @@ class DynamicDepthwiseConv(nn.Module):
         # else:
         #     raise ValueError("Invalid kernel size supplied to DynamicConvLayer")
         
-        # TODO - weight standardization?
-        weight_mean = weights.mean(dim=1, keepdim=True).mean(dim=2,
-                                  keepdim=True).mean(dim=3, keepdim=True)
-        weights = weights - weight_mean
-        std = weights.view(weights.size(0), -1).std(dim=1).view(-1, 1, 1, 1) + 1e-5
-        weights = weights / std.expand_as(weights)
+        # weight_mean = weights.mean(dim=1, keepdim=True).mean(dim=2,
+        #                            keepdim=True).mean(dim=3, keepdim=True)
+        # weights = weights - weight_mean
+        # std = weights.view(weights.size(0), -1).std(dim=1).view(-1, 1, 1, 1) + 1e-5
+        # weights = weights / std.expand_as(weights)
         
+        padding = same_padding(kernel_size)
         return F.conv2d(x, weights, None,
-                        self.base_conv.stride, padding=same_padding(kernel_size),
+                        self.base_conv.stride, padding=padding,
                         groups=channels)
     
     def reorganize_channels(self, sorted_indices, dim):
@@ -227,8 +243,8 @@ class DynamicDepthwiseConv(nn.Module):
 
     def initialize_weights(self):
         torch.nn.init.xavier_uniform_(self.base_conv.weight)
-        torch.nn.init.xavier_uniform_(self.five_by_five_transformation)
-        torch.nn.init.xavier_uniform_(self.three_by_three_transformation)
+        # torch.nn.init.xavier_uniform_(self.five_by_five_transformation)
+        # torch.nn.init.xavier_uniform_(self.three_by_three_transformation)
 
 
 class DynamicConv(nn.Module):
@@ -268,7 +284,8 @@ class FirstInvertedResidual(nn.Module):
         hidden_channels = _make_divisible(in_channels, 8)
         
         self.conv = nn.Sequential(
-            nn.Conv2d(hidden_channels, hidden_channels, kernel_size, stride, padding=same_padding(kernel_size), bias=False),
+            nn.Conv2d(hidden_channels, hidden_channels, kernel_size, stride,
+                      groups=hidden_channels, padding=same_padding(kernel_size), bias=False),
             nn.BatchNorm2d(hidden_channels),
             nn.ReLU(inplace=True),
             nn.Conv2d(hidden_channels, out_channels, 1, 1, bias=False),
@@ -357,14 +374,15 @@ class DynamicInvertedResidual(nn.Module):
 
 
 class DynamicBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, max_kernel_size=7, max_expansion_ratio=6, stride=1, use_se=True, use_hs=True):
+    def __init__(self, in_channels, out_channels, max_kernel_size=7, max_depth=4,
+                 max_expansion_ratio=6, stride=1, use_se=True, use_hs=True):
         super(DynamicBlock, self).__init__()
         self.layers = [
             DynamicInvertedResidual(in_channels, out_channels, max_kernel_size, max_expansion_ratio,
                                     stride=stride, use_se=use_se, use_hs=use_hs)
         ] + [
             DynamicInvertedResidual(out_channels, out_channels, max_kernel_size, max_expansion_ratio,
-                                    use_se=use_se, use_hs=use_hs) for _ in range(3)
+                                    use_se=use_se, use_hs=use_hs) for _ in range(max_depth - 1)
         ]
         self.layers = nn.ModuleList(self.layers)
         
@@ -386,17 +404,27 @@ class DynamicBlock(nn.Module):
 class MobileNetV3OFA(nn.Module):
     def __init__(self, output_widths=None, use_squeeze_excites=None,
                  use_hard_swishes=None, strides=None, input_data_channels=3, num_classes=1000,
-                 width_mult=1., max_kernel_size=7, max_expansion_ratio=6):
+                 width_mult=1., max_kernel_size=7, max_expansion_ratio=6, max_depth=4):
         super(MobileNetV3OFA, self).__init__()
+        # if output_widths is None:
+        #     output_widths = [16, 16, 24, 40, 80, 112, 160, 960, 1280]
+        # if use_squeeze_excites is None:
+        #     use_squeeze_excites = [False, False, True, False, True, True, True, True, True]
+        # if use_hard_swishes is None:
+        #     use_hard_swishes = [True, False, False, True, True, True, True, True, True]
+        # if strides is None:
+        #     strides = [1, 1, 2, 2, 1, 2, 1, 1, 1]
         if output_widths is None:
             output_widths = [16, 16, 24, 40, 80, 112, 160, 960, 1280]
         if use_squeeze_excites is None:
-            use_squeeze_excites = [False, False, True, False, True, True, True, True, True]
+            use_squeeze_excites = [False, False, False, True, False, True, True, False, False]
         if use_hard_swishes is None:
-            use_hard_swishes = [True, False, False, True, True, True, True, True, True]
+            use_hard_swishes = [True, False, False, False, True, True, True, True, True]
         if strides is None:
-            strides = [1, 1, 2, 2, 1, 2, 1, 1, 1]
-        
+            strides = [2, 1, 2, 2, 2, 1, 2, 1, 1]
+        self.max_expansion_ratio = max_expansion_ratio
+        self.max_kernel_size = max_kernel_size
+        self.max_depth = max_depth
         output_widths = [_make_divisible(x * width_mult, 8) for x in output_widths]
         self.first_conv = nn.Sequential(
             nn.Conv2d(input_data_channels, output_widths[0],
@@ -413,8 +441,9 @@ class MobileNetV3OFA(nn.Module):
             self.blocks.append(DynamicBlock(
                 in_channels=output_widths[i - 1],
                 out_channels=output_widths[i],
-                max_kernel_size=max_kernel_size,
-                max_expansion_ratio=max_expansion_ratio,
+                max_kernel_size=self.max_kernel_size,
+                max_expansion_ratio=self.max_expansion_ratio,
+                max_depth=self.max_depth,
                 stride=strides[i],
                 use_se=use_squeeze_excites[i],
                 use_hs=use_hard_swishes[i])
@@ -427,6 +456,12 @@ class MobileNetV3OFA(nn.Module):
         )
 
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        # self.feature_mix = nn.Sequential(
+        #     nn.Conv2d(output_widths[-2], output_widths[-1], 1, strides[-1], 0, bias=False),
+        #     activation_function(use_hard_swishes[-1])
+        # )
+
+        
         self.classifier = nn.Sequential(
             nn.Linear(output_widths[-2], output_widths[-1]),
             activation_function(use_hard_swishes[-1]),
@@ -436,7 +471,13 @@ class MobileNetV3OFA(nn.Module):
         
         self.initialize_weights()
     
-    def forward(self, x, depths, kernel_sizes, expansion_ratios):
+    def forward(self, x, depths=None, kernel_sizes=None, expansion_ratios=None):
+        if not depths:
+            depths = [self.max_depth for _ in range(self.num_blocks)]
+        if not kernel_sizes:
+            kernel_sizes = [[self.max_kernel_size for _ in range(self.max_depth)] for _ in range(self.num_blocks)]
+        if not expansion_ratios:
+            expansion_ratios = [[self.max_expansion_ratio for _ in range(self.max_depth)] for _ in range(self.num_blocks)]
         y = self.first_conv(x)
         y = self.first_inverted_residual(y)
         for i in range(len(self.blocks)):
