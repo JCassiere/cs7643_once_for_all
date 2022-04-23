@@ -3,11 +3,24 @@ import torch
 import copy
 import torch.nn.functional as F
 import itertools
+import tqdm
 
+# https://towardsdatascience.com/what-is-label-smoothing-108debd7ef06
+def smooth_labels(targets, num_classes, alpha=0.1):
+    # soft_labels = torch.argmax(F.softmax(teacher_output, dim=1), dim=1)
+    # num_classes = teacher_output.size(1)
+    one_hot = F.one_hot(targets, num_classes)
+    # batch_size = target.size(0)
+    # target = torch.unsqueeze(target, 1)
+    # soft_target = torch.zeros((batch_size, n_classes), device=target.device)
+    # soft_target.scatter_(1, target, 1)
+    # label smoothing
+    soft_target = (1 - alpha) * one_hot + alpha / num_classes
+    return soft_target
 
 def distillation_loss(teacher_output, student_output):
     return torch.mean(torch.sum(-F.softmax(teacher_output, dim=1) * F.log_softmax(student_output, dim=1), 1))
-    
+
 def eval_one_epoch(net, epoch, test_loader, depth_choices,
                    kernel_choices, expansion_ratio_choices):
     net.eval()
@@ -44,6 +57,7 @@ def train_loop(net, train_loader, test_loader, lr, epochs,
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_iterations)
     
     criterion = torch.nn.CrossEntropyLoss()
+    with tqdm
     for epoch in range(epochs):
         net.train()
         for (idx, batch) in enumerate(train_loader):
@@ -55,7 +69,8 @@ def train_loop(net, train_loader, test_loader, lr, epochs,
             optimizer.zero_grad()
             images, targets = batch
             output = net.forward(images, depths, kernels, expansion_ratios)
-            loss = criterion(output, targets)
+            smoothed_labels = smooth_labels(targets, output.size(1))
+            loss = criterion(output, smoothed_labels)
             loss.backward()
             optimizer.step()
             scheduler.step()
@@ -89,7 +104,8 @@ def train_loop_with_distillation(net, teacher, train_loader, test_loader, lr, ep
             with torch.no_grad():
                 teacher_pred = teacher.forward(images).detach()
             dist_loss = distillation_loss(output, teacher_pred)
-            student_loss = criterion(output, targets)
+            smoothed_labels = smooth_labels(targets, output.size(1))
+            student_loss = criterion(output, smoothed_labels)
             # loss = 0.1 * dist_loss + 0.9 * student_loss
             loss = dist_loss + student_loss
             loss.backward()

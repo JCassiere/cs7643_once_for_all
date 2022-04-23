@@ -163,7 +163,7 @@ def test_progressive_shrinking():
     # net = small_test_ofa_net()
     net = large_test_ofa_net()
     # get_num_params(net)
-    # params = [p for p in net.parameters()]
+    params = [p for p in net.parameters()]
     net.to(device)
     # progressive_shrinking(train_data_loader, test_data_loader, net, base_net_epochs=50,
     #                       elastic_kernel_epochs=50, elastic_depth_epochs_stage_1=5,
@@ -181,7 +181,7 @@ def test_progressive_shrinking():
     #                       elastic_depth_lr_stage_1=0.08, elastic_depth_lr_stage_2=0.20,
     #                       elastic_width_lr_stage_1=0.08, elastic_width_lr_stage_2=0.20)
     progressive_shrinking(train_data_loader, test_data_loader, net, base_net_lr=.026,
-                          base_net_epochs=65, elastic_kernel_epochs=50, elastic_depth_epochs_stage_2=50,
+                          base_net_epochs=20, elastic_kernel_epochs=50, elastic_depth_epochs_stage_2=50,
                           elastic_width_epochs_stage_2=50,
                           elastic_kernel_lr=.03, elastic_depth_lr_stage_1=.0008,
                           elastic_depth_lr_stage_2=.0024, elastic_width_lr_stage_1=.0008,

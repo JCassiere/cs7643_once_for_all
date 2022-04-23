@@ -54,18 +54,22 @@ class DynamicSELayer(nn.Module):
         self.reduction = reduction
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         hidden_channels = _make_divisible(channels // self.reduction, 8)
-        self.squeeze = nn.Linear(channels, hidden_channels)
+        self.squeeze = nn.Conv2d(channels, hidden_channels, 1, 1, 0)
+        # self.squeeze = nn.Linear(channels, hidden_channels)
         self.relu = nn.ReLU(inplace=True)
-        self.excite = nn.Linear(hidden_channels, channels)
+        self.excite = nn.Conv2d(hidden_channels, channels, 1, 1, 0)
+        # self.excite = nn.Linear(hidden_channels, channels)
         self.hsigmoid = nn.Hardsigmoid(inplace=True)
     
     def forward(self, x):
         batch, in_channels, _, _ = x.size()
         hidden_channels = _make_divisible(in_channels // self.reduction, 8)
-        y = self.avg_pool(x).view(batch, in_channels)
-        y = F.linear(y, self.squeeze.weight[:hidden_channels, :in_channels], self.squeeze.bias[:hidden_channels])
+        y = self.avg_pool(x).view(batch, in_channels, 1, 1)
+        y = F.conv2d(y, self.squeeze.weight[:hidden_channels, :in_channels, :, :], self.squeeze.bias[:hidden_channels],
+                     stride=self.squeeze.stride, padding=self.squeeze.padding)
         y = self.relu(y)
-        y = F.linear(y, self.excite.weight[:in_channels, :hidden_channels], self.excite.bias[:in_channels])
+        y = F.conv2d(y, self.excite.weight[:in_channels, :hidden_channels, :, :], self.excite.bias[:in_channels],
+                     stride=self.excite.stride, padding=self.excite.padding)
         y = self.hsigmoid(y).view(batch, in_channels, 1, 1)
         return x * y
     
@@ -461,10 +465,13 @@ class MobileNetV3OFA(nn.Module):
         #     activation_function(use_hard_swishes[-1])
         # )
 
-        
-        self.classifier = nn.Sequential(
-            nn.Linear(output_widths[-2], output_widths[-1]),
+        self.feature_mix = nn.Sequential(
+            nn.Conv2d(output_widths[-2], output_widths[-1], 1, 1, 0, bias=False),
             activation_function(use_hard_swishes[-1]),
+        )
+        self.classifier = nn.Sequential(
+            # nn.Linear(output_widths[-2], output_widths[-1]),
+            # activation_function(use_hard_swishes[-1]),
             nn.Dropout(0.2),
             nn.Linear(output_widths[-1], num_classes)
         )
@@ -483,7 +490,9 @@ class MobileNetV3OFA(nn.Module):
         for i in range(len(self.blocks)):
             y = self.blocks[i].forward(y, depths[i], kernel_sizes[i], expansion_ratios[i])
         y = self.final_conv(y)
-        y = self.avgpool(y).view(y.size(0), -1)
+        y = self.avgpool(y)
+        # y = y.view(y.size(0), -1)
+        y = self.feature_mix(y).view(y.size(0), -1)
         y = self.classifier(y)
         
         return y
