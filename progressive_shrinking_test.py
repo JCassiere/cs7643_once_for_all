@@ -4,13 +4,24 @@ import torch.nn
 import torchvision
 from torch.utils.data import DataLoader
 import torch.utils.data as data_utils
+# from torchviz import make_dot
 from ofa.mobilenetv3 import mobilenetv3_large, mobilenetv3_small
 from ofa.mobilenetv3_ofa import mobilenetv3_ofa
 from ofa.progressive_shrinking import progressive_shrinking
 from ofa.progressive_shrinking import train_loop, train_loop_with_distillation
 import cProfile
 
-
+# def get_graph():
+#     device = get_device()
+#     train_data_loader, _ = get_cifar_dataloaders(device)
+#     net = large_test_ofa_net()
+#     for (i, batch) in enumerate(train_data_loader):
+#         images, targets = batch
+#         out = net.forward(images)
+#         make_dot(out, params=dict(net.named_parameters())).render("ofa_torchviz", format="png")
+#         break
+        
+    
 def get_num_params(net):
     param_count = sum([torch.numel(p) for p in net.parameters()])
     return param_count
@@ -78,9 +89,9 @@ def get_cifar_dataloaders(device, subset=False):
     if subset:
         indices = torch.arange(1000)
         cifar_test = data_utils.Subset(cifar_test, indices)
-    train_data_loader = DataLoader(cifar_train, batch_size=128, shuffle=True,
+    train_data_loader = DataLoader(cifar_train, batch_size=64, shuffle=True,
                                    collate_fn=collate_fn_to_device)
-    test_data_loader = DataLoader(cifar_test, batch_size=128, shuffle=True,
+    test_data_loader = DataLoader(cifar_test, batch_size=256, shuffle=True,
                                   collate_fn=collate_fn_to_device)
     return train_data_loader, test_data_loader
 
@@ -151,9 +162,30 @@ def test_elastic_kernel():
     net.to(device)
     teacher = copy.deepcopy(net)
     print("in elastic kernel")
-    train_loop_with_distillation(net, teacher, train_data_loader, test_data_loader, lr=0.00096, epochs=125,
+    train_loop_with_distillation(net, teacher, train_data_loader, test_data_loader, lr=0.03, epochs=125,
                                  depth_choices=[4], kernel_choices=[3, 5, 7],
                                  expansion_ratio_choices=[6])
+
+def test_elastic_depth():
+    device = get_device()
+    train_data_loader, test_data_loader = get_cifar_dataloaders(device)
+    
+    # net = small_test_ofa_net()
+    net = large_test_ofa_net()
+    if torch.cuda.is_available():
+        net.load_state_dict(torch.load("checkpoint/big_network.pt"))
+    else:
+        net.load_state_dict(torch.load("checkpoint/big_network.pt", map_location=torch.device('cpu')))
+    net.to(device)
+    teacher = copy.deepcopy(net)
+    print("in elastic depth")
+    train_loop_with_distillation(net, teacher, train_data_loader, test_data_loader, lr=0.0008, epochs=1,
+                                 depth_choices=[3, 4], kernel_choices=[7],
+                                 expansion_ratio_choices=[6], num_subs_to_sample=2)
+    
+    train_loop_with_distillation(net, teacher, train_data_loader, test_data_loader, lr=0.0024, epochs=20,
+                                 depth_choices=[2, 3, 4], kernel_choices=[7],
+                                 expansion_ratio_choices=[6], num_subs_to_sample=2)
 
 
 def test_progressive_shrinking():
@@ -162,7 +194,7 @@ def test_progressive_shrinking():
     
     # net = small_test_ofa_net()
     net = large_test_ofa_net()
-    # get_num_params(net)
+    count = get_num_params(net)
     params = [p for p in net.parameters()]
     net.to(device)
     # progressive_shrinking(train_data_loader, test_data_loader, net, base_net_epochs=50,
@@ -181,7 +213,7 @@ def test_progressive_shrinking():
     #                       elastic_depth_lr_stage_1=0.08, elastic_depth_lr_stage_2=0.20,
     #                       elastic_width_lr_stage_1=0.08, elastic_width_lr_stage_2=0.20)
     progressive_shrinking(train_data_loader, test_data_loader, net, base_net_lr=.026,
-                          base_net_epochs=20, elastic_kernel_epochs=50, elastic_depth_epochs_stage_2=50,
+                          base_net_epochs=5, elastic_kernel_epochs=50, elastic_depth_epochs_stage_2=50,
                           elastic_width_epochs_stage_2=50,
                           elastic_kernel_lr=.03, elastic_depth_lr_stage_1=.0008,
                           elastic_depth_lr_stage_2=.0024, elastic_width_lr_stage_1=.0008,
@@ -218,14 +250,20 @@ def fine_tune_smallest_network():
 #  kernel sizes, within 5 or so percentage points
 # TODO - implement checkpointing system where best weights are checked and saved
 #  after each epoch
+
+# TODO - kernels 3 and 5 learning better than 7
+
+# TODO - initialization like the original?
 if __name__ == "__main__":
     # train_mobilenetv3_cifar100()
-    # cProfile.run('train_mobilenetv3ofa_cifar100()', 'profile')
+    # cProfile.run('train_mobileZDnetv3ofa_cifar100()', 'profile')
     # train_mobilenetv3ofa_cifar100()
     # learn_on_small_kernel_only()
     
-    # test_elastic_kernel()
+    test_elastic_kernel()
+    # test_elastic_depth()
     # train_smallest_network()
     # train_on_small_kernel_only()
     # 1 epoch/30s on colab
-    test_progressive_shrinking()
+    # test_progressive_shrinking()
+    # get_graph()
