@@ -1,5 +1,5 @@
 import random
-
+from cs7643_once_for_all.ofa.accuracy_network import AccNetTrainer
 from cs7643_once_for_all.ofa.model_arch import ModelArch
 
 
@@ -10,13 +10,15 @@ class EvoSearch:
         self.S = samples
         self.arch = architectures
 
-    def search(self):
+    def search(self, net, loader, batchsize=64, num_blocks = 5, kernel_choices = [3, 5, 7], depth_choices = [2, 3, 4], expansion_ratio_choices = [3, 4, 6]):
         population = []
         history = []
-
+        acc_net_trainer = AccNetTrainer(net, loader, batchsize, num_blocks, kernel_choices, depth_choices, expansion_ratio_choices)
+        acc_net_trainer.train()
+        
         for i in range(self.P):
             model = random.choice(self.arch)
-            model.acc = train_eval(model.arch)
+            model.acc = acc_net_trainer.model(model.arch)
             population.append(model)
             history.append(model)
         
