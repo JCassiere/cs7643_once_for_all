@@ -11,6 +11,7 @@ from ofa.progressive_shrinking import progressive_shrinking
 from ofa.progressive_shrinking import train_loop, train_loop_with_distillation
 import cProfile
 
+
 # def get_graph():
 #     device = get_device()
 #     train_data_loader, _ = get_cifar_dataloaders(device)
@@ -20,8 +21,8 @@ import cProfile
 #         out = net.forward(images)
 #         make_dot(out, params=dict(net.named_parameters())).render("ofa_torchviz", format="png")
 #         break
-        
-    
+
+
 def get_num_params(net):
     param_count = sum([torch.numel(p) for p in net.parameters()])
     return param_count
@@ -162,9 +163,10 @@ def test_elastic_kernel():
     net.to(device)
     teacher = copy.deepcopy(net)
     print("in elastic kernel")
-    train_loop_with_distillation(net, teacher, train_data_loader, test_data_loader, lr=0.03, epochs=125,
-                                 depth_choices=[4], kernel_choices=[3, 5, 7],
-                                 expansion_ratio_choices=[6])
+    train_loop(net, train_data_loader, test_data_loader, lr=0.03, epochs=125,
+               depth_choices=[4], kernel_choices=[3, 5, 7],
+               expansion_ratio_choices=[6], teacher=teacher)
+
 
 def test_elastic_depth():
     device = get_device()
@@ -179,14 +181,13 @@ def test_elastic_depth():
     net.to(device)
     teacher = copy.deepcopy(net)
     print("in elastic depth")
-    train_loop_with_distillation(net, teacher, train_data_loader, test_data_loader, lr=0.0008, epochs=1,
+    train_loop(net, train_data_loader, test_data_loader, lr=0.0008, epochs=1,
                                  depth_choices=[3, 4], kernel_choices=[7],
-                                 expansion_ratio_choices=[6], num_subs_to_sample=2)
+                                 expansion_ratio_choices=[6], teacher=teacher, num_subs_to_sample=2)
     
-    train_loop_with_distillation(net, teacher, train_data_loader, test_data_loader, lr=0.0024, epochs=20,
+    train_loop(net, train_data_loader, test_data_loader, lr=0.0024, epochs=20,
                                  depth_choices=[2, 3, 4], kernel_choices=[7],
-                                 expansion_ratio_choices=[6], num_subs_to_sample=2)
-
+                                 expansion_ratio_choices=[6], teacher=teacher, num_subs_to_sample=2)
 
 def test_progressive_shrinking():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -213,7 +214,7 @@ def test_progressive_shrinking():
     #                       elastic_depth_lr_stage_1=0.08, elastic_depth_lr_stage_2=0.20,
     #                       elastic_width_lr_stage_1=0.08, elastic_width_lr_stage_2=0.20)
     progressive_shrinking(train_data_loader, test_data_loader, net, base_net_lr=.026,
-                          base_net_epochs=5, elastic_kernel_epochs=50, elastic_depth_epochs_stage_2=50,
+                          base_net_epochs=25, elastic_kernel_epochs=50, elastic_depth_epochs_stage_2=50,
                           elastic_width_epochs_stage_2=50,
                           elastic_kernel_lr=.03, elastic_depth_lr_stage_1=.0008,
                           elastic_depth_lr_stage_2=.0024, elastic_width_lr_stage_1=.0008,
@@ -224,8 +225,8 @@ def test_progressive_shrinking():
     #                       elastic_kernel_lr=.0096, elastic_depth_lr_stage_1=.0008,
     #                       elastic_depth_lr_stage_2=.0024, elastic_width_lr_stage_1=.0008,
     #                       elastic_width_lr_stage_2=.0024)
-    
-    
+
+
 def train_smallest_network():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     train_data_loader, test_data_loader = get_cifar_dataloaders(device)
@@ -234,6 +235,7 @@ def train_smallest_network():
     net.to(device)
     train_loop(net, train_data_loader, test_data_loader, lr=0.3, epochs=100,
                depth_choices=[2], kernel_choices=[3], expansion_ratio_choices=[3])
+
 
 def fine_tune_smallest_network():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
