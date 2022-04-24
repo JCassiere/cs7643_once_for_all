@@ -28,14 +28,14 @@ def get_num_params(net):
     return param_count
 
 
-def large_test_ofa_net():
+def large_test_ofa_net(num_classes=100):
     # default ofa (as seen in paper)
     
     # output_widths = [16, 16, 24, 40, 80, 112, 160, 960, 1280]
     # use_squeeze_excites = [False, False, True, False, True, True, True, True, True]
     # use_hard_swishes = [True, False, False, True, True, True, True, True, True]
     # strides = [1, 1, 2, 2, 1, 2, 1, 1, 1]
-    net = mobilenetv3_ofa(num_classes=100)
+    net = mobilenetv3_ofa(num_classes=num_classes)
     return net
 
 
@@ -55,7 +55,7 @@ def small_test_ofa_net():
     return net
 
 
-def get_cifar_dataloaders(device, subset=False):
+def get_cifar_dataloaders(device, cifar_dataset=torchvision.datasets.CIFAR100, subset=False):
     def collate_fn_to_device(batch):
         # adapted from pytorch default_collate_fn
         transposed = list(zip(*batch))
@@ -64,7 +64,8 @@ def get_cifar_dataloaders(device, subset=False):
         
         return images, targets
     
-    cifar_train = torchvision.datasets.CIFAR100(
+    # TODO - create validation sampler rather than test sampler
+    cifar_train = cifar_dataset(
         root='./data',
         train=True,
         download=True,
@@ -73,13 +74,14 @@ def get_cifar_dataloaders(device, subset=False):
             torchvision.transforms.RandomCrop(32, padding=4),
             torchvision.transforms.RandomHorizontalFlip(),
             torchvision.transforms.ToTensor(),
+            # mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010]
             torchvision.transforms.Normalize((0.5071, 0.4865, 0.4409), (0.2673, 0.2564, 0.2762)),
         ]))
     if subset:
         indices = torch.arange(6000)
         cifar_train = data_utils.Subset(cifar_train, indices)
     
-    cifar_test = torchvision.datasets.CIFAR100(
+    cifar_test = cifar_dataset(
         root='./data',
         train=False,
         download=True,
@@ -167,6 +169,22 @@ def test_elastic_kernel():
                depth_choices=[4], kernel_choices=[3, 5, 7],
                expansion_ratio_choices=[6], teacher=teacher)
 
+def test_elastic_kernel_cifar10():
+    device = get_device()
+    train_data_loader, test_data_loader = get_cifar_dataloaders(device, cifar_dataset=torchvision.datasets.CIFAR10)
+    
+    # net = small_test_ofa_net()
+    net = large_test_ofa_net(num_classes=10)
+    if torch.cuda.is_available():
+        net.load_state_dict(torch.load("checkpoint/big_network.pt"))
+    else:
+        net.load_state_dict(torch.load("checkpoint/big_network.pt", map_location=torch.device('cpu')))
+    net.to(device)
+    teacher = copy.deepcopy(net)
+    print("in elastic kernel")
+    train_loop(net, train_data_loader, test_data_loader, lr=0.009, epochs=125,
+               depth_choices=[4], kernel_choices=[3, 5],
+               expansion_ratio_choices=[6], teacher=teacher)
 
 def test_elastic_depth():
     device = get_device()
@@ -189,10 +207,32 @@ def test_elastic_depth():
                                  depth_choices=[2, 3, 4], kernel_choices=[7],
                                  expansion_ratio_choices=[6], teacher=teacher, num_subs_to_sample=2)
 
+
+def test_progressive_shrinking_cifar10():
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    train_data_loader, test_data_loader = get_cifar_dataloaders(device, cifar_dataset=torchvision.datasets.CIFAR10)
+    
+    # net = large_test_ofa_net(num_classes=10)
+    net = mobilenetv3_ofa(num_classes=10, max_kernel_size=5)
+    
+    net.to(device)
+    progressive_shrinking(train_data_loader, test_data_loader, net, base_net_lr=.026,
+                          base_net_epochs=15, elastic_kernel_epochs=0, elastic_depth_epochs_stage_2=50,
+                          elastic_width_epochs_stage_2=50,
+                          elastic_kernel_lr=.009, elastic_depth_lr_stage_1=.0008,
+                          elastic_depth_lr_stage_2=.0024, elastic_width_lr_stage_1=.0008,
+                          elastic_width_lr_stage_2=.0024)
+    
+    # Probably the best settings for a final good run
+    # progressive_shrinking(train_data_loader, test_data_loader, net, base_net_lr=.026,
+    #                       elastic_kernel_lr=.0096, elastic_depth_lr_stage_1=.0008,
+    #                       elastic_depth_lr_stage_2=.0024, elastic_width_lr_stage_1=.0008,
+    #                       elastic_width_lr_stage_2=.0024)
+
 def test_progressive_shrinking():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     train_data_loader, test_data_loader = get_cifar_dataloaders(device)
-    
+
     # net = small_test_ofa_net()
     net = large_test_ofa_net()
     count = get_num_params(net)
@@ -214,12 +254,12 @@ def test_progressive_shrinking():
     #                       elastic_depth_lr_stage_1=0.08, elastic_depth_lr_stage_2=0.20,
     #                       elastic_width_lr_stage_1=0.08, elastic_width_lr_stage_2=0.20)
     progressive_shrinking(train_data_loader, test_data_loader, net, base_net_lr=.026,
-                          base_net_epochs=25, elastic_kernel_epochs=50, elastic_depth_epochs_stage_2=50,
+                          base_net_epochs=50, elastic_kernel_epochs=50, elastic_depth_epochs_stage_2=50,
                           elastic_width_epochs_stage_2=50,
                           elastic_kernel_lr=.03, elastic_depth_lr_stage_1=.0008,
                           elastic_depth_lr_stage_2=.0024, elastic_width_lr_stage_1=.0008,
                           elastic_width_lr_stage_2=.0024)
-    
+
     # Probably the best settings for a final good run
     # progressive_shrinking(train_data_loader, test_data_loader, net, base_net_lr=.026,
     #                       elastic_kernel_lr=.0096, elastic_depth_lr_stage_1=.0008,
@@ -262,10 +302,12 @@ if __name__ == "__main__":
     # train_mobilenetv3ofa_cifar100()
     # learn_on_small_kernel_only()
     
-    test_elastic_kernel()
+    # test_elastic_kernel()
+    # test_elastic_kernel_cifar10()
     # test_elastic_depth()
     # train_smallest_network()
     # train_on_small_kernel_only()
     # 1 epoch/30s on colab
     # test_progressive_shrinking()
+    test_progressive_shrinking_cifar10()
     # get_graph()

@@ -175,17 +175,22 @@ class DynamicBatchNorm(nn.Module):
 
 
 class DynamicDepthwiseConv(nn.Module):
+    '''
+    Supports kernel sizes of {3, 5, 7}
+    '''
     def __init__(self, channels, max_kernel_size, stride=1):
         super(DynamicDepthwiseConv, self).__init__()
         self.base_conv = nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=max_kernel_size,
                                    padding=same_padding(max_kernel_size), stride=stride,
                                    groups=channels, bias=False)
-        self.three_by_three_transformation = nn.Parameter(torch.eye(9))
-        self.five_by_five_transformation = nn.Parameter(torch.eye(25))
+        self.max_kernel_size = max_kernel_size
+        if self.max_kernel_size > 3:
+            self.three_by_three_transformation = nn.Parameter(torch.eye(9))
+        if self.max_kernel_size > 5:
+            self.five_by_five_transformation = nn.Parameter(torch.eye(25))
     
     def forward(self, x: torch.Tensor, kernel_size):
         # TODO - don't copy weights - mask somehow?
-        # if kernel_size == 7:
         channels = x.size(1)
         weights = self.base_conv.weight[:channels, :, :, :]
         # lay out the kernels in 1D vectors
@@ -194,40 +199,16 @@ class DynamicDepthwiseConv(nn.Module):
         # for example, for a 5x5 kernel, lay it out to be 1x25
         # then multiply by the 25x25 transformation matrix to get a transformed 1x25 matrix
         # then view that as a 5x5 matrix, which is your kernel
-        
-        # TODO - I think to use kernel size=3, you first need to go from 7 to 5, then 5 to 3
         if kernel_size <= 5:
-            weights = weights[:channels, :, 1:6, 1:6].contiguous().view(channels, 25)
-            # weights = weights[:channels, :, 1:6, 1:6]
-            # weights = weights.contiguous()
-            # weights = weights.view(weights.size(0), weights.size(1), -1)
-            # weights = weights.view(-1, weights.size(2))
-            # weights = weights.view(channels, 25)
-            # weights = F.linear(weights, self.five_by_five_transformation)
-            # weights = weights.view(channels, 1, 25)
-            # weights = weights.view(channels, 1, 5, 5)
-            weights = F.linear(weights, self.five_by_five_transformation).view(channels, 1, 5, 5)
+            if self.max_kernel_size > 5:
+                weights = weights[:channels, :, 1:6, 1:6].contiguous().view(channels, 25)
+                weights = F.linear(weights, self.five_by_five_transformation).view(channels, 1, 5, 5)
         if kernel_size == 3:
-            # weights = weights[:channels, :, 1:4, 1:4].contiguous().view(channels, 9)
-            weights = weights[:channels, :, 1:4, 1:4]
-            weights = weights.contiguous()
-            weights = weights.view(weights.size(0), weights.size(1), -1)
-            weights = weights.view(-1, weights.size(2))
-            weights = F.linear(weights, self.three_by_three_transformation)
-            weights = weights.view(channels, 1, 9)
-            weights = weights.view(channels, 1, 3, 3)
-            
-            # weights = F.linear(weights, self.three_by_three_transformation).view(channels, 1, 3, 3)
-        # elif kernel_size == 5:
-        #     weights = self.base_conv.weight[:channels, :, 1:6, 1:6].contiguous().view(channels, 25)
-        #     weights = torch.matmul(weights, self.five_by_five_transformation).view(channels, 1, 5, 5)
-        # elif kernel_size == 3:
-        #     weights = self.base_conv.weight[:channels, :, 2:5, 2:5].contiguous().view(channels, 9)
-        #     weights = torch.matmul(weights, self.three_by_three_transformation).view(channels, 1, 3, 3)
-        #
-        # else:
-        #     raise ValueError("Invalid kernel size supplied to DynamicConvLayer")
+            if self.max_kernel_size > 3:
+                weights = weights[:channels, :, 1:4, 1:4].contiguous().view(channels, 9)
+                weights = F.linear(weights, self.three_by_three_transformation).view(channels, 1, 3, 3)
         
+        # weight standardization
         # weight_mean = weights.mean(dim=1, keepdim=True).mean(dim=2,
         #                            keepdim=True).mean(dim=3, keepdim=True)
         # weights = weights - weight_mean
