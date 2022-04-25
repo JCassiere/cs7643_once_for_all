@@ -45,7 +45,7 @@ def get_network_config(num_blocks, kernel_choices, depth_choices, expansion_rati
     return config
 
 
-def eval_one_epoch(experiment:Experiment, epoch, test_loader, depth_choices,
+def eval_one_epoch(experiment: Experiment, epoch, test_loader, depth_choices,
                    kernel_choices, expansion_ratio_choices):
     net = experiment.net
     net.eval()
@@ -70,7 +70,7 @@ def eval_one_epoch(experiment:Experiment, epoch, test_loader, depth_choices,
                 pred = torch.argmax(output, dim=1)
                 test_correct.append((pred == targets).int())
             test_correct = torch.cat(test_correct, dim=-1)
-            accuracy = torch.mean(torch.sum(test_correct) / test_correct.shape[0])
+            accuracy = torch.mean(torch.sum(test_correct) / test_correct.shape[0]).item()
             config_str = "K{}-D{}-ExR{}".format(config[0], config[1], config[2])
             print("Epoch {} {} accuracy: {}".format(epoch, config_str, accuracy))
             current_epoch_val_accuracies[config_str] = accuracy
@@ -79,7 +79,8 @@ def eval_one_epoch(experiment:Experiment, epoch, test_loader, depth_choices,
 
 def train_loop(experiment: Experiment, lr, epochs,
                depth_choices, kernel_choices, expansion_ratio_choices,
-               teacher=None, weight_decay=3e-5, num_subnetworks_per_minibatch=1):
+               teacher=None, weight_decay=3e-5, num_subnetworks_per_minibatch=1,
+               eval_first=True):
     net = experiment.net
     train_loader = experiment.train_data_loader
     test_loader = experiment.val_data_loader
@@ -91,8 +92,9 @@ def train_loop(experiment: Experiment, lr, epochs,
     
     # criterion = torch.nn.CrossEntropyLoss()
     criterion = cross_entropy_loss
-    eval_one_epoch(net, -1, test_loader, depth_choices,
-                   kernel_choices, expansion_ratio_choices)
+    if eval_first:
+        eval_one_epoch(experiment, -1, test_loader, depth_choices,
+                       kernel_choices, expansion_ratio_choices)
     for epoch in range(epochs):
         # TODO - add top5 accuracy alongside top1
         with tqdm(total=steps_per_epoch,
@@ -140,14 +142,14 @@ def train_loop(experiment: Experiment, lr, epochs,
                 
         experiment.append_train_accuracy(current_epoch_train_acc)
         
-        eval_one_epoch(net, epoch, test_loader, depth_choices,
+        eval_one_epoch(experiment, epoch, test_loader, depth_choices,
                        kernel_choices, expansion_ratio_choices)
 
 
 def train_big_network(experiment: Experiment):
-    kernel_choices = experiment.overall_kernel_choices[0]
-    depth_choices = experiment.overall_depth_choices[0]
-    expansion_ratio_choices = experiment.overall_expansion_ratio_choices[0]
+    kernel_choices = experiment.overall_kernel_choices[:1]
+    depth_choices = experiment.overall_depth_choices[:1]
+    expansion_ratio_choices = experiment.overall_expansion_ratio_choices[:1]
     train_loop(
         experiment,
         lr=experiment.base_net_lr,
@@ -155,6 +157,7 @@ def train_big_network(experiment: Experiment):
         depth_choices=depth_choices,
         kernel_choices=kernel_choices,
         expansion_ratio_choices=expansion_ratio_choices,
+        eval_first=False,
         weight_decay=3e-4
     )
     experiment.log(stage="big_network")
@@ -165,8 +168,8 @@ def train_elastic_kernel(experiment: Experiment, load_stage=None):
     if load_stage:
         experiment.load_net_post_stage(load_stage)
     kernel_choices = experiment.overall_kernel_choices[:]
-    depth_choices = experiment.overall_depth_choices[0]
-    expansion_ratio_choices = experiment.overall_expansion_ratio_choices[0]
+    depth_choices = experiment.overall_depth_choices[:1]
+    expansion_ratio_choices = experiment.overall_expansion_ratio_choices[:1]
     train_loop(
         experiment,
         lr=experiment.elastic_kernel_lr,
@@ -185,7 +188,7 @@ def train_elastic_depth_stage_1(experiment: Experiment, load_stage=None):
         experiment.load_net_post_stage(load_stage)
     kernel_choices = experiment.overall_kernel_choices[:]
     depth_choices = experiment.overall_depth_choices[:2]
-    expansion_ratio_choices = experiment.overall_expansion_ratio_choices[0]
+    expansion_ratio_choices = experiment.overall_expansion_ratio_choices[:1]
     train_loop(
         experiment,
         lr=experiment.elastic_depth_lr_stage_1,
@@ -194,7 +197,8 @@ def train_elastic_depth_stage_1(experiment: Experiment, load_stage=None):
         kernel_choices=kernel_choices,
         expansion_ratio_choices=expansion_ratio_choices,
         weight_decay=3e-5,
-        teacher=experiment.get_teacher()
+        teacher=experiment.get_teacher(),
+        num_subnetworks_per_minibatch=2
     )
     experiment.log(stage="elastic_depth_stage_1")
 
@@ -204,7 +208,7 @@ def train_elastic_depth_stage_2(experiment: Experiment, load_stage=None):
         experiment.load_net_post_stage(load_stage)
     kernel_choices = experiment.overall_kernel_choices[:]
     depth_choices = experiment.overall_depth_choices[:]
-    expansion_ratio_choices = experiment.overall_expansion_ratio_choices[0]
+    expansion_ratio_choices = experiment.overall_expansion_ratio_choices[:1]
     train_loop(
         experiment,
         lr=experiment.elastic_depth_lr_stage_2,
@@ -213,7 +217,8 @@ def train_elastic_depth_stage_2(experiment: Experiment, load_stage=None):
         kernel_choices=kernel_choices,
         expansion_ratio_choices=expansion_ratio_choices,
         weight_decay=3e-5,
-        teacher=experiment.get_teacher()
+        teacher=experiment.get_teacher(),
+        num_subnetworks_per_minibatch=2
     )
     experiment.log(stage="elastic_depth_stage_2")
 
@@ -232,7 +237,8 @@ def train_elastic_width_stage_1(experiment: Experiment, load_stage=None):
         kernel_choices=kernel_choices,
         expansion_ratio_choices=expansion_ratio_choices,
         weight_decay=3e-5,
-        teacher=experiment.teacher()
+        teacher=experiment.get_teacher(),
+        num_subnetworks_per_minibatch=4
     )
     experiment.log(stage="elastic_width_stage_1")
 
@@ -251,7 +257,8 @@ def train_elastic_width_stage_2(experiment: Experiment, load_stage=None):
         kernel_choices=kernel_choices,
         expansion_ratio_choices=expansion_ratio_choices,
         weight_decay=3e-5,
-        teacher=experiment.teacher()
+        teacher=experiment.get_teacher(),
+        num_subnetworks_per_minibatch=4
     )
     experiment.log(stage="elastic_width_stage_2")
 

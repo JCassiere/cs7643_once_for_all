@@ -7,6 +7,7 @@ from ofa.datasets import get_dataloaders
 from ofa.utils import get_device
 from ofa.mobilenetv3_ofa import MobileNetV3OFA
 
+
 class Experiment:
     def __init__(self, **kwargs):
         self.device = get_device()
@@ -71,6 +72,7 @@ class Experiment:
             max_depth=max_depth,
             dropout=self.dropout
         )
+        self.net.to(self.device)
         self.current_stage_train_accuracies = []
         self.current_stage_val_accuracies = {}
         self.teacher = None
@@ -123,7 +125,7 @@ class Experiment:
         pass
     
     def save_config(self):
-        config = self.__dict__
+        config = copy.deepcopy(self.__dict__)
         config.pop("net")
         config.pop("device")
         config.pop("train_data_loader")

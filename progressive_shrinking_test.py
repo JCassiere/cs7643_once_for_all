@@ -72,7 +72,13 @@ def test_elastic_depth():
 def test_progressive_shrinking():
     exp_kwargs = {
         "dataset_name": "cifar10",
-        "experiment_name": "default_cifar10_{}".format(int(time.time()))
+        "experiment_name": "cifar10_100_epochs_per_stage_{}".format(int(time.time())),
+        "base_net_epochs": 100,
+        "elastic_kernel_epochs": 100,
+        "elastic_depth_epochs_stage_1": 25,
+        "elastic_depth_epochs_stage_2": 100,
+        "elastic_width_epochs_stage_1": 25,
+        "elastic_width_epochs_stage_2": 100
     }
     experiment = Experiment(**exp_kwargs)
     progressive_shrinking_from_scratch(experiment)
