@@ -207,51 +207,28 @@ def test_progressive_shrinking_cifar10():
     #                       elastic_width_lr_stage_2=.0024)
 
 def test_progressive_shrinking():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    train_data_loader, test_data_loader = get_cifar_dataloaders(device)
-
-    # net = small_test_ofa_net()
-    net = large_test_ofa_net()
-    count = get_num_params(net)
-    params = [p for p in net.parameters()]
-    net.to(device)
-    # progressive_shrinking(train_data_loader, test_data_loader, net, base_net_epochs=50,
-    #                       elastic_kernel_epochs=50, elastic_depth_epochs_stage_1=5,
-    #                       elastic_depth_epochs_stage_2=50, elastic_width_epochs_stage_1=5,
-    #                       elastic_width_epochs_stage_2=50, base_net_lr=0.96, elastic_kernel_lr=0.20,
-    #                       elastic_depth_lr_stage_1=0.05, elastic_depth_lr_stage_2=0.1,
-    #                       elastic_width_lr_stage_1=0.05, elastic_width_lr_stage_2=0.1,)
-    # progressive_shrinking(train_data_loader, test_data_loader, net, base_net_epochs=25,
-    #                       elastic_kernel_epochs=25, elastic_depth_epochs_stage_1=5,
-    #                       elastic_depth_epochs_stage_2=25, elastic_width_epochs_stage_1=5,
-    #                       elastic_width_epochs_stage_2=25, base_net_lr=0.24, elastic_kernel_lr=0.20,
-    #                       elastic_depth_lr_stage_1=0.05, elastic_depth_lr_stage_2=0.1,
-    #                       elastic_width_lr_stage_1=0.05, elastic_width_lr_stage_2=0.1, )
-    # progressive_shrinking(train_data_loader, test_data_loader, net, base_net_lr=0.30, elastic_kernel_lr=0.26,
-    #                       elastic_depth_lr_stage_1=0.08, elastic_depth_lr_stage_2=0.20,
-    #                       elastic_width_lr_stage_1=0.08, elastic_width_lr_stage_2=0.20)
-    progressive_shrinking_from_scratch(train_data_loader, test_data_loader, net, base_net_lr=.026,
-                                       base_net_epochs=50, elastic_kernel_epochs=50, elastic_depth_epochs_stage_2=50,
-                                       elastic_width_epochs_stage_2=50,
-                                       elastic_kernel_lr=.03, elastic_depth_lr_stage_1=.0008,
-                                       elastic_depth_lr_stage_2=.0024, elastic_width_lr_stage_1=.0008,
-                                       elastic_width_lr_stage_2=.0024)
-
-    # Probably the best settings for a final good run
-    # progressive_shrinking(train_data_loader, test_data_loader, net, base_net_lr=.026,
-    #                       elastic_kernel_lr=.0096, elastic_depth_lr_stage_1=.0008,
-    #                       elastic_depth_lr_stage_2=.0024, elastic_width_lr_stage_1=.0008,
-    #                       elastic_width_lr_stage_2=.0024)
-
-
-def train_smallest_network():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    train_data_loader, test_data_loader = get_cifar_dataloaders(device)
-    
-    net = small_test_ofa_net()
-    net.to(device)
-    train_loop(net, train_data_loader, test_data_loader, lr=0.3, epochs=100,
-               depth_choices=[2], kernel_choices=[3], expansion_ratio_choices=[3])
+    exp_kwargs = {
+        "dataset_name": "cifar10",
+        "experiment_name": "cifar10_100_epochs_per_stage_{}".format(int(time.time())),
+        "base_net_epochs": 100,
+        "elastic_kernel_epochs": 100,
+        "elastic_depth_epochs_stage_1": 25,
+        "elastic_depth_epochs_stage_2": 100,
+        "elastic_width_epochs_stage_1": 25,
+        "elastic_width_epochs_stage_2": 100
+    }
+    exp_kwargs = {
+        "dataset_name": "mnist",
+        "experiment_name": "mnist_100_epochs_per_stage_{}".format(int(time.time())),
+        "base_net_epochs": 100,
+        "elastic_kernel_epochs": 100,
+        "elastic_depth_epochs_stage_1": 25,
+        "elastic_depth_epochs_stage_2": 100,
+        "elastic_width_epochs_stage_1": 25,
+        "elastic_width_epochs_stage_2": 100
+    }
+    experiment = Experiment(**exp_kwargs)
+    progressive_shrinking_from_scratch(experiment)
 
 
 def fine_tune_smallest_network():

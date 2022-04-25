@@ -39,11 +39,8 @@ class Experiment:
         self.use_squeeze_excites = kwargs.get("use_squeeze_excites", [False, False, False, True, False, True, True, False, False])
         self.use_hard_swishes = kwargs.get("use_hard_swishes", [True, False, False, False, True, True, True, True, True])
         self.strides = kwargs.get("strides", [2, 1, 2, 2, 2, 1, 2, 1, 1])
-        if self.dataset_name == "mnist":
-            input_data_channels = 1
-        else:
-            input_data_channels = 3
-            
+        
+        input_data_channels = 3
         if self.dataset_name in ["mnist", "cifar10"]:
             num_classes = 10
         elif self.dataset_name == "cifar100":
