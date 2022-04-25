@@ -7,7 +7,7 @@ import torch.utils.data as data_utils
 # from torchviz import make_dot
 from ofa.mobilenetv3 import mobilenetv3_large, mobilenetv3_small
 from ofa.mobilenetv3_ofa import mobilenetv3_ofa
-from ofa.progressive_shrinking import progressive_shrinking
+from ofa.progressive_shrinking import progressive_shrinking_from_scratch
 from ofa.progressive_shrinking import train_loop
 import cProfile
 
@@ -39,8 +39,6 @@ def large_test_ofa_net(num_classes=100):
     return net
 
 
-def get_device():
-    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 def small_test_ofa_net():
@@ -195,12 +193,12 @@ def test_progressive_shrinking_cifar10():
     net = mobilenetv3_ofa(num_classes=10, max_kernel_size=5)
     
     net.to(device)
-    progressive_shrinking(train_data_loader, test_data_loader, net, base_net_lr=.026,
-                          base_net_epochs=15, elastic_kernel_epochs=0, elastic_depth_epochs_stage_2=50,
-                          elastic_width_epochs_stage_2=50,
-                          elastic_kernel_lr=.009, elastic_depth_lr_stage_1=.0008,
-                          elastic_depth_lr_stage_2=.0024, elastic_width_lr_stage_1=.0008,
-                          elastic_width_lr_stage_2=.0024)
+    progressive_shrinking_from_scratch(train_data_loader, test_data_loader, net, base_net_lr=.026,
+                                       base_net_epochs=15, elastic_kernel_epochs=0, elastic_depth_epochs_stage_2=50,
+                                       elastic_width_epochs_stage_2=50,
+                                       elastic_kernel_lr=.009, elastic_depth_lr_stage_1=.0008,
+                                       elastic_depth_lr_stage_2=.0024, elastic_width_lr_stage_1=.0008,
+                                       elastic_width_lr_stage_2=.0024)
     
     # Probably the best settings for a final good run
     # progressive_shrinking(train_data_loader, test_data_loader, net, base_net_lr=.026,
@@ -232,12 +230,12 @@ def test_progressive_shrinking():
     # progressive_shrinking(train_data_loader, test_data_loader, net, base_net_lr=0.30, elastic_kernel_lr=0.26,
     #                       elastic_depth_lr_stage_1=0.08, elastic_depth_lr_stage_2=0.20,
     #                       elastic_width_lr_stage_1=0.08, elastic_width_lr_stage_2=0.20)
-    progressive_shrinking(train_data_loader, test_data_loader, net, base_net_lr=.026,
-                          base_net_epochs=50, elastic_kernel_epochs=50, elastic_depth_epochs_stage_2=50,
-                          elastic_width_epochs_stage_2=50,
-                          elastic_kernel_lr=.03, elastic_depth_lr_stage_1=.0008,
-                          elastic_depth_lr_stage_2=.0024, elastic_width_lr_stage_1=.0008,
-                          elastic_width_lr_stage_2=.0024)
+    progressive_shrinking_from_scratch(train_data_loader, test_data_loader, net, base_net_lr=.026,
+                                       base_net_epochs=50, elastic_kernel_epochs=50, elastic_depth_epochs_stage_2=50,
+                                       elastic_width_epochs_stage_2=50,
+                                       elastic_kernel_lr=.03, elastic_depth_lr_stage_1=.0008,
+                                       elastic_depth_lr_stage_2=.0024, elastic_width_lr_stage_1=.0008,
+                                       elastic_width_lr_stage_2=.0024)
 
     # Probably the best settings for a final good run
     # progressive_shrinking(train_data_loader, test_data_loader, net, base_net_lr=.026,

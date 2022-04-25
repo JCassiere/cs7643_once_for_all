@@ -1,7 +1,6 @@
 import torch
 import torchvision
 from torch.utils.data import DataLoader
-import torch.utils.data as data_utils
 
 def get_dataloaders(device, dataset_name="cifar100"):
     def collate_fn_to_device(batch):
@@ -16,18 +15,14 @@ def get_dataloaders(device, dataset_name="cifar100"):
         torch_dataset = torchvision.datasets.CIFAR100
         norm_mean = (0.5071, 0.4865, 0.4409)
         norm_std = (0.2673, 0.2564, 0.2762)
-        train_size = 50000
-        val_size = 10000
     elif dataset_name == "cifar10":
         torch_dataset = torchvision.datasets.CIFAR10
         norm_mean = (0.4914, 0.4822, 0.4465)
         norm_std = (0.2023, 0.1994, 0.2010)
-        train_size = 50000
-        val_size = 10000
     else:
         raise ValueError("{} dataset not supported".format(dataset_name))
     
-    dataset = torch_dataset(
+    train_dataset = torch_dataset(
         root='./data',
         train=True,
         download=True,
@@ -38,9 +33,6 @@ def get_dataloaders(device, dataset_name="cifar100"):
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize(mean=norm_mean, std=norm_std),
         ]))
-    
-    train_dataset, val_dataset =\
-        data_utils.random_split(dataset, (train_size, val_size))
     
     test_dataset = torch_dataset(
         root='./data',
@@ -53,9 +45,7 @@ def get_dataloaders(device, dataset_name="cifar100"):
     
     train_data_loader = DataLoader(train_dataset, batch_size=64, shuffle=True,
                                    collate_fn=collate_fn_to_device)
-    val_data_loader = DataLoader(train_dataset, batch_size=256, shuffle=True,
-                                 collate_fn=collate_fn_to_device)
     test_data_loader = DataLoader(test_dataset, batch_size=256, shuffle=True,
                                   collate_fn=collate_fn_to_device)
     
-    return train_data_loader, val_data_loader, test_data_loader
+    return train_data_loader, test_data_loader
