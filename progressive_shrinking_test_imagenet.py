@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader
 import torch.utils.data as data_utils
 from ofa.mobilenetv3 import mobilenetv3_large, mobilenetv3_small
 from ofa.mobilenetv3_ofa import mobilenetv3_ofa
-from ofa.progressive_shrinking import progressive_shrinking
+from ofa.progressive_shrinking import progressive_shrinking_from_scratch
 from ofa.progressive_shrinking import train_loop
 import cProfile
 import os
@@ -166,12 +166,12 @@ def test_progressive_shrinking():
     net = small_test_ofa_net()
     # net = large_test_ofa_net()
     net.to(device)
-    progressive_shrinking(train_data_loader, test_data_loader, net, base_net_epochs=50,
-                          elastic_kernel_epochs=100, elastic_depth_epochs_stage_1=5,
-                          elastic_depth_epochs_stage_2=50, elastic_width_epochs_stage_1=5,
-                          elastic_width_epochs_stage_2=50, base_net_lr=0.24, elastic_kernel_lr=0.20,
-                          elastic_depth_lr_stage_1=0.05, elastic_depth_lr_stage_2=0.1,
-                          elastic_width_lr_stage_1=0.05, elastic_width_lr_stage_2=0.1,)
+    progressive_shrinking_from_scratch(train_data_loader, test_data_loader, net, base_net_epochs=50,
+                                       elastic_kernel_epochs=100, elastic_depth_epochs_stage_1=5,
+                                       elastic_depth_epochs_stage_2=50, elastic_width_epochs_stage_1=5,
+                                       elastic_width_epochs_stage_2=50, base_net_lr=0.24, elastic_kernel_lr=0.20,
+                                       elastic_depth_lr_stage_1=0.05, elastic_depth_lr_stage_2=0.1,
+                                       elastic_width_lr_stage_1=0.05, elastic_width_lr_stage_2=0.1, )
     # progressive_shrinking(train_data_loader, test_data_loader, net, base_net_epochs=25,
     #                       elastic_kernel_epochs=25, elastic_depth_epochs_stage_1=5,
     #                       elastic_depth_epochs_stage_2=25, elastic_width_epochs_stage_1=5,
