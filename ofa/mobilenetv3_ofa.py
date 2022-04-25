@@ -10,13 +10,7 @@ Weight standardization - https://github.com/joe-siyuan-qiao/WeightStandardizatio
 
 import torch.nn as nn
 import torch.nn.functional as F
-import math
-
-
-# __all__ = ['mobilenetv3_large', 'mobilenetv3_small']
-
 import torch.nn.init
-from collections import OrderedDict
 
 def activation_function(use_hard_swish=True):
     if use_hard_swish:
@@ -55,10 +49,8 @@ class DynamicSELayer(nn.Module):
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         hidden_channels = _make_divisible(channels // self.reduction, 8)
         self.squeeze = nn.Conv2d(channels, hidden_channels, 1, 1, 0)
-        # self.squeeze = nn.Linear(channels, hidden_channels)
         self.relu = nn.ReLU(inplace=True)
         self.excite = nn.Conv2d(hidden_channels, channels, 1, 1, 0)
-        # self.excite = nn.Linear(hidden_channels, channels)
         self.hsigmoid = nn.Hardsigmoid(inplace=True)
     
     def forward(self, x):
@@ -208,14 +200,7 @@ class DynamicDepthwiseConv(nn.Module):
             if self.max_kernel_size > 3:
                 weights = weights[:channels, :, 1:4, 1:4].contiguous().view(channels, 9)
                 weights = F.linear(weights, self.three_by_three_transformation).view(channels, 1, 3, 3)
-        
-        # weight standardization
-        # weight_mean = weights.mean(dim=1, keepdim=True).mean(dim=2,
-        #                            keepdim=True).mean(dim=3, keepdim=True)
-        # weights = weights - weight_mean
-        # std = weights.view(weights.size(0), -1).std(dim=1).view(-1, 1, 1, 1) + 1e-5
-        # weights = weights / std.expand_as(weights)
-        
+                
         padding = same_padding(kernel_size)
         return F.conv2d(x, weights, None,
                         self.base_conv.stride, padding=padding,
@@ -230,8 +215,6 @@ class DynamicDepthwiseConv(nn.Module):
 
     def initialize_weights(self):
         torch.nn.init.xavier_uniform_(self.base_conv.weight)
-        # torch.nn.init.xavier_uniform_(self.five_by_five_transformation)
-        # torch.nn.init.xavier_uniform_(self.three_by_three_transformation)
 
 
 class DynamicConv(nn.Module):
@@ -277,7 +260,6 @@ class FirstInvertedResidual(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(hidden_channels, out_channels, 1, 1, bias=False),
             nn.BatchNorm2d(out_channels),
-            # nn.ReLU(inplace=True)
         )
     
     def forward(self, x):
@@ -328,7 +310,6 @@ class DynamicInvertedResidual(nn.Module):
         y = self.se_layer.forward(y)
         y = self.pointwise_conv.forward(y, hidden_channels, self.out_channels)
         y = self.pointwise_norm.forward(y)
-        # y = self.activation(y)
         
         if self.add_residual:
             return x + y
@@ -390,18 +371,10 @@ class DynamicBlock(nn.Module):
     
 class MobileNetV3OFA(nn.Module):
     def __init__(self, output_widths=None, use_squeeze_excites=None,
-                 use_hard_swishes=None, strides=None, input_data_channels=3, num_classes=1000,
+                 use_hard_swishes=None, strides=None, input_data_channels=3, num_classes=10,
                  width_mult=1., max_kernel_size=7, max_expansion_ratio=6, max_depth=4,
                  dropout=0.1):
         super(MobileNetV3OFA, self).__init__()
-        # if output_widths is None:
-        #     output_widths = [16, 16, 24, 40, 80, 112, 160, 960, 1280]
-        # if use_squeeze_excites is None:
-        #     use_squeeze_excites = [False, False, True, False, True, True, True, True, True]
-        # if use_hard_swishes is None:
-        #     use_hard_swishes = [True, False, False, True, True, True, True, True, True]
-        # if strides is None:
-        #     strides = [1, 1, 2, 2, 1, 2, 1, 1, 1]
         if output_widths is None:
             output_widths = [16, 16, 24, 40, 80, 112, 160, 960, 1280]
         if use_squeeze_excites is None:
@@ -444,19 +417,11 @@ class MobileNetV3OFA(nn.Module):
         )
 
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        # self.feature_mix = nn.Sequential(
-        #     nn.Conv2d(output_widths[-2], output_widths[-1], 1, strides[-1], 0, bias=False),
-        #     activation_function(use_hard_swishes[-1])
-        # )
-
         self.feature_mix = nn.Sequential(
             nn.Conv2d(output_widths[-2], output_widths[-1], 1, 1, 0, bias=False),
             activation_function(use_hard_swishes[-1]),
         )
         self.classifier = nn.Sequential(
-            # nn.Linear(output_widths[-2], output_widths[-1]),
-            # activation_function(use_hard_swishes[-1]),
-            # nn.Dropout(dropout),
             nn.Linear(output_widths[-1], num_classes),
             nn.Dropout(dropout)
         )
@@ -476,7 +441,6 @@ class MobileNetV3OFA(nn.Module):
             y = self.blocks[i].forward(y, depths[i], kernel_sizes[i], expansion_ratios[i])
         y = self.final_conv(y)
         y = self.avgpool(y)
-        # y = y.view(y.size(0), -1)
         y = self.feature_mix(y).view(y.size(0), -1)
         y = self.classifier(y)
         

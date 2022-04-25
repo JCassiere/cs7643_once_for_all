@@ -1,21 +1,25 @@
 import copy
+import os
 import time
+import json
 import torch
-from datasets import get_dataloaders
-from utils import get_device
-from mobilenetv3_ofa import MobileNetV3OFA
+from ofa.datasets import get_dataloaders
+from ofa.utils import get_device
+from ofa.mobilenetv3_ofa import MobileNetV3OFA
+
 
 class Experiment:
     def __init__(self, **kwargs):
-        self.kwargs = kwargs
-        
         self.device = get_device()
         # dataset setup
+        # choices = {cifar10, cifar100, mnist}
         self.dataset_name = kwargs.get("dataset_name", "cifar10")
         self.train_data_loader, self.val_data_loader = get_dataloaders(self.device, self.dataset_name)
         
-        self.experiment_name = kwargs.get("experiment_name", time.time())
-        self.save_dir = "./checkpoint/" + self.experiment_name + "/"
+        self.experiment_name = kwargs.get("experiment_name", "default_{}".format(int(time.time())))
+        self.save_dir = "./experiments/" + self.experiment_name + "/"
+        if not os.path.exists(self.save_dir):
+            os.makedirs(self.save_dir)
         self.base_net_epochs = kwargs.get("base_net_epochs", 180)
         self.base_net_lr = kwargs.get("base_net_lr", .026)
         self.overall_kernel_choices = sorted(kwargs.get("kernel_choices", [3, 5]), reverse=True)
@@ -65,22 +69,44 @@ class Experiment:
             max_depth=max_depth,
             dropout=self.dropout
         )
+        self.net.to(self.device)
         self.current_stage_train_accuracies = []
-        self.current_stage_val_accuracies = []
+        self.current_stage_val_accuracies = {}
         self.teacher = None
+        self.save_config()
     
-    def log(self, stage: str):
+    # TODO - implement checkpointing system where best weights are checked and saved
+    #  after each epoch
+    def log(self, stage: str, clear: bool = True):
         torch.save(self.net.state_dict(), self.save_dir + stage + '.pt')
+        
+        results = {
+            'train_accuracies': self.current_stage_train_accuracies,
+            'val_accuracies': self.current_stage_val_accuracies
+        }
+        with open(self.save_dir + stage + "_results.json", 'w') as file:
+            json.dump(results, file)
+        
+        if clear:
+            self.clear_results()
+        
+    def clear_results(self):
+        self.current_stage_train_accuracies = []
+        self.current_stage_val_accuracies = {}
     
     def load_net_post_stage(self, stage: str):
-        checkpoint_file = "experiments/{}.pt".format(stage)
+        checkpoint_file = self.save_dir + stage + ".pt"
         self.net.load_state_dict(torch.load(checkpoint_file, map_location=self.device))
         
     def append_train_accuracy(self, accuracy: float):
         self.current_stage_train_accuracies.append(accuracy)
         
     def append_val_accuracies(self, accuracies: dict):
-        self.current_stage_val_accuracies.append(accuracies)
+        for key, value in accuracies.items():
+            if key in self.current_stage_val_accuracies:
+                self.current_stage_val_accuracies[key].append(value)
+            else:
+                self.current_stage_val_accuracies[key] = [value]
     
     def set_teacher(self):
         self.teacher = copy.deepcopy(self.net)
@@ -91,10 +117,19 @@ class Experiment:
         #  for the full network
         return self.teacher
         
-    # TODO
+    # TODO - load experiment from config
     def from_config(self):
         pass
     
     def save_config(self):
-        pass
+        config = copy.deepcopy(self.__dict__)
+        config.pop("net")
+        config.pop("device")
+        config.pop("train_data_loader")
+        config.pop("val_data_loader")
+        config.pop("current_stage_train_accuracies")
+        config.pop("current_stage_val_accuracies")
+        config.pop("teacher")
+        with open(self.save_dir + "config.json", 'w') as file:
+            json.dump(config, file, indent=4)
     
