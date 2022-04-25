@@ -8,7 +8,7 @@ import torch.utils.data as data_utils
 from ofa.mobilenetv3 import mobilenetv3_large, mobilenetv3_small
 from ofa.mobilenetv3_ofa import mobilenetv3_ofa
 from ofa.progressive_shrinking import progressive_shrinking
-from ofa.progressive_shrinking import train_loop, train_loop_with_distillation
+from ofa.progressive_shrinking import train_loop
 import cProfile
 
 
@@ -55,48 +55,6 @@ def small_test_ofa_net():
     return net
 
 
-def get_cifar_dataloaders(device, cifar_dataset=torchvision.datasets.CIFAR100, subset=False):
-    def collate_fn_to_device(batch):
-        # adapted from pytorch default_collate_fn
-        transposed = list(zip(*batch))
-        images = torch.stack(transposed[0], 0).to(device)
-        targets = torch.tensor(transposed[1]).to(device)
-        
-        return images, targets
-    
-    # TODO - create validation sampler rather than test sampler
-    cifar_train = cifar_dataset(
-        root='./data',
-        train=True,
-        download=True,
-        transform=torchvision.transforms.Compose([
-            # this performs random shifts by up to 4 pixels
-            torchvision.transforms.RandomCrop(32, padding=4),
-            torchvision.transforms.RandomHorizontalFlip(),
-            torchvision.transforms.ToTensor(),
-            # mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010]
-            torchvision.transforms.Normalize((0.5071, 0.4865, 0.4409), (0.2673, 0.2564, 0.2762)),
-        ]))
-    if subset:
-        indices = torch.arange(6000)
-        cifar_train = data_utils.Subset(cifar_train, indices)
-    
-    cifar_test = cifar_dataset(
-        root='./data',
-        train=False,
-        download=True,
-        transform=torchvision.transforms.Compose([
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize((0.5071, 0.4865, 0.4409), (0.2673, 0.2564, 0.2762)),
-        ]))
-    if subset:
-        indices = torch.arange(1000)
-        cifar_test = data_utils.Subset(cifar_test, indices)
-    train_data_loader = DataLoader(cifar_train, batch_size=64, shuffle=True,
-                                   collate_fn=collate_fn_to_device)
-    test_data_loader = DataLoader(cifar_test, batch_size=256, shuffle=True,
-                                  collate_fn=collate_fn_to_device)
-    return train_data_loader, test_data_loader
 
 
 def train_mobilenetv3_cifar100():
