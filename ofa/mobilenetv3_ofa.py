@@ -99,6 +99,7 @@ class DynamicSELayer(nn.Module):
         # do this by measuring importance of the input channels to the excitation layer
         importance = torch.sum(torch.abs(self.excite.weight), dim=0)
         _, internal_sorted_indices = torch.sort(importance, dim=0, descending=True)
+        internal_sorted_indices = internal_sorted_indices.view(-1)
         # don't reorder the excite bias, since it is added to the output
         # and we are reordering the input channels here
         self.excite.weight.data = torch.index_select(

@@ -8,6 +8,8 @@ import random
 
 # from torchviz import make_dot
 
+
+
 # https://raberrytv.wordpress.com/2017/10/29/pytorch-weight-decay-made-easy/
 def add_weight_decay(net, alpha=3e-5, skip_list=()):
     decay, no_decay = [], []
@@ -74,7 +76,6 @@ def train_loop(net, train_loader, test_loader, lr, epochs,
     # TODO - no weight decay on biases or batch norm
     params = add_weight_decay(net, alpha=weight_decay)
     optimizer = torch.optim.SGD(params, lr=lr, momentum=0.9, nesterov=True)
-    # optimizer = torch.optim.SGD(net.parameters(), lr=lr, weight_decay=3e-5, momentum=0.9, nesterov=True)
     steps_per_epoch = len(train_loader)
     max_iterations = epochs * steps_per_epoch
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_iterations)
@@ -93,7 +94,7 @@ def train_loop(net, train_loader, test_loader, lr, epochs,
             for (idx, batch) in enumerate(train_loader):
                 optimizer.zero_grad()
                 for _ in range(num_subnetworks_per_minibatch):
-                    # taken from original repo
+                    # seeding code taken from original repo
                     subnet_seed = int('%d%.3d%.3d' % (epoch * steps_per_epoch + idx, _, 0))
                     random.seed(subnet_seed)
                     
@@ -112,7 +113,6 @@ def train_loop(net, train_loader, test_loader, lr, epochs,
                         dist_loss = criterion(output, soft_label)
                         smoothed_labels = smooth_labels(targets, output.size(1))
                         student_loss = criterion(output, smoothed_labels)
-                        # loss = 0.1 * dist_loss + 0.9 * student_loss
                         loss = dist_loss + student_loss
                     else:
                         smoothed_labels = smooth_labels(targets, output.size(1))
@@ -138,7 +138,6 @@ def train_loop_with_distillation(net, teacher, train_loader, test_loader, lr, ep
                                  num_subs_to_sample=1):
     params = add_weight_decay(net)
     optimizer = torch.optim.SGD(params, lr=lr, momentum=0.9, nesterov=True)
-    # optimizer = torch.optim.SGD(net.parameters(), lr=lr, weight_decay=3e-5, momentum=0.9, nesterov=True)
     steps_per_epoch = len(train_loader)
     max_iterations = epochs * steps_per_epoch
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_iterations)
@@ -150,10 +149,8 @@ def train_loop_with_distillation(net, teacher, train_loader, test_loader, lr, ep
     # TODO - track training error
     for epoch in range(epochs):
         net.train()
-        # print(net.blocks[0].layers[0].depthwise_convolution.base_conv.weight[0][0])
         with tqdm(total=len(train_loader),
                   desc="Train Epoch #{}".format(epoch)) as t:
-            # if epoch > 0:
             for (idx, batch) in enumerate(train_loader):
                 for _ in range(num_subs_to_sample):
                     config = get_network_config(net.num_blocks, kernel_choices, depth_choices, expansion_ratio_choices)
@@ -199,103 +196,85 @@ def get_network_config(num_blocks, kernel_choices, depth_choices, expansion_rati
     return config
 
 
-def progressive_shrinking(train_loader, test_loader, net, **kwargs):
+def progressive_shrinking(train_loader, test_loader, net, experiment_name, **kwargs):
     max_expansion_ratio = kwargs.get("max_expansion_ratio", 6)
-    max_depth = kwargs.get("max_depth", 4)
     base_net_epochs = kwargs.get("base_net_epochs", 180)
     base_net_lr = kwargs.get("base_net_lr", 2.6)
+    overall_kernel_choices = kwargs.get("kernel_choices", [3, 5])
     elastic_kernel_epochs = kwargs.get("elastic_kernel_epochs", 125)
     elastic_kernel_lr = kwargs.get("elastic_kernel_lr", 0.96)
+    overall_depth_choices = kwargs.get("depth_choices", [2, 3, 4])
     elastic_depth_epochs_stage_1 = kwargs.get("elastic_depth_epochs_stage_1", 25)
     elastic_depth_lr_stage_1 = kwargs.get("elastic_depth_lr_stage_1", 0.08)
     elastic_depth_epochs_stage_2 = kwargs.get("elastic_depth_epochs_stage_2", 125)
     elastic_depth_lr_stage_2 = kwargs.get("elastic_depth_lr_stage_2", 0.24)
+    overall_expansion_ratio_choices = kwargs.get("expansion_ratio_choices", [3, 4, 6])
     elastic_width_epochs_stage_1 = kwargs.get("elastic_width_epochs_stage_1", 25)
     elastic_width_lr_stage_1 = kwargs.get("elastic_width_lr_stage_1", 0.08)
     elastic_width_epochs_stage_2 = kwargs.get("elastic_width_epochs_stage_2", 125)
     elastic_width_lr_stage_2 = kwargs.get("elastic_width_lr_stage_2", 0.24)
     
-    depth_choices = [max_depth]
-    # kernel_choices = [7]
-    kernel_choices = [5]
-    expansion_ratio_choices = [max_expansion_ratio]
+    overall_kernel_choices.sort(reverse=True)
+    overall_depth_choices.sort(reverse=True)
+    overall_expansion_ratio_choices.sort(reverse=True)
+    kernel_choices = overall_kernel_choices[:1]
+    depth_choices = overall_depth_choices[:1]
+    expansion_ratio_choices = overall_expansion_ratio_choices[:1]
     
-    # # warm-up
-    # train_loop(net, train_loader, test_loader, lr=0.4, epochs=10,
-    #            depth_choices=depth_choices, kernel_choices=kernel_choices,
-    #            expansion_ratio_choices=expansion_ratio_choices, scheduler=False)
+    directory = './checkpoint/' + experiment_name + '/'
     # big network training
     train_loop(net, train_loader, test_loader, lr=base_net_lr, epochs=base_net_epochs,
                depth_choices=depth_choices, kernel_choices=kernel_choices,
                expansion_ratio_choices=expansion_ratio_choices, weight_decay=3e-4)
-    torch.save(net.state_dict(), './checkpoint/big_network.pt')
+    torch.save(net.state_dict(), directory + 'big_network.pt')
     
-    teacher = copy.deepcopy(net)
     # elastic kernel
-    # kernel_choices = [3, 5, 7]
-    # kernel_choices = [3, 5]
-    # train_loop(net, train_loader, test_loader, lr=elastic_kernel_lr,
-    #            epochs=elastic_kernel_epochs, depth_choices=depth_choices,
-    #            kernel_choices=kernel_choices, expansion_ratio_choices=expansion_ratio_choices,
-    #            teacher=teacher)
-    # torch.save(net.state_dict(), './checkpoint/elastic_kernel.pt')
+    teacher = copy.deepcopy(net)
+    kernel_choices = overall_kernel_choices[:]
+    train_loop(net, train_loader, test_loader, lr=elastic_kernel_lr,
+               epochs=elastic_kernel_epochs, depth_choices=depth_choices,
+               kernel_choices=kernel_choices, expansion_ratio_choices=expansion_ratio_choices,
+               teacher=teacher)
+    torch.save(net.state_dict(), directory + '/elastic_kernel.pt')
     
-    # TODO - sample 2 networks at each step and aggregate gradients
     # elastic depth stage 1
-    depth_choices = [max_depth]
-    if max_depth - 1 > 0:
-        depth_choices.append(max_depth - 1)
-    # kernel_choices = [7, 5, 3]
+    # teacher = copy.deepcopy(net)
+    depth_choices = overall_depth_choices[:2]
     train_loop(net, train_loader, test_loader, lr=elastic_depth_lr_stage_1,
                epochs=elastic_depth_epochs_stage_1,
                depth_choices=depth_choices, kernel_choices=kernel_choices,
                expansion_ratio_choices=expansion_ratio_choices, teacher=teacher,
                num_subnetworks_per_minibatch=2)
-    torch.save(net.state_dict(), './checkpoint/elastic_depth_stage1.pt')
+    torch.save(net.state_dict(), directory + 'elastic_depth_stage1.pt')
     
     # elastic depth stage 2
-    depth_choices = [max_depth]
-    for i in range(1, 3):
-        if max_depth - i > 0:
-            depth_choices.append(max_depth - i)
-        else:
-            break
-    # kernel_choices = [7, 5, 3]
+    # teacher = copy.deepcopy(net)
+    depth_choices = overall_depth_choices[:]
     train_loop(net, train_loader, test_loader, lr=elastic_depth_lr_stage_2,
                epochs=elastic_depth_epochs_stage_2,
                depth_choices=depth_choices, kernel_choices=kernel_choices,
                expansion_ratio_choices=expansion_ratio_choices, teacher=teacher,
                num_subnetworks_per_minibatch=2)
-    torch.save(net.state_dict(), './checkpoint/elastic_depth_stage2.pt')
+    torch.save(net.state_dict(), directory + 'elastic_depth_stage2.pt')
     
     # elastic width stage 1
-    # TODO - reorder_channels not working
+    # teacher = copy.deepcopy(net)
     net.reorder_channels()
-    expansion_ratio_choices = [4, 3]
-    # expansion_ratio_choices = [max_expansion_ratio]
-    # if max_expansion_ratio - 2 > 0:
-    #     expansion_ratio_choices.append(max_expansion_ratio - 2)
-    
-    # kernel_choices = [7, 5, 3]
+    expansion_ratio_choices = overall_expansion_ratio_choices[:2]
     train_loop(net, train_loader, test_loader, lr=elastic_width_lr_stage_1,
                epochs=elastic_width_epochs_stage_1,
                depth_choices=depth_choices, kernel_choices=kernel_choices,
                expansion_ratio_choices=expansion_ratio_choices, teacher=teacher,
                num_subnetworks_per_minibatch=4)
-    torch.save(net.state_dict(), './checkpoint/elastic_width_stage1.pt')
+    torch.save(net.state_dict(), directory + 'elastic_width_stage1.pt')
     
     # elastic width stage 2
+    # teacher = copy.deepcopy(net)
     net.reorder_channels()
-    expansion_ratio_choices = [max_expansion_ratio]
-    # for x in [2, 3]:
-    #     if max_expansion_ratio - x > 0:
-    #         expansion_ratio_choices.append(max_expansion_ratio - x)
-    #     else:
-    #         break
-    
+    expansion_ratio_choices = overall_expansion_ratio_choices[:]
     train_loop(net, train_loader, test_loader, lr=elastic_width_lr_stage_2,
                epochs=elastic_width_epochs_stage_2,
                depth_choices=depth_choices, kernel_choices=kernel_choices,
                expansion_ratio_choices=expansion_ratio_choices, teacher=teacher,
                num_subnetworks_per_minibatch=4)
-    torch.save(net.state_dict(), './checkpoint/elastic_width_stage2.pt')
+    torch.save(net.state_dict(), directory + 'elastic_width_stage2.pt')

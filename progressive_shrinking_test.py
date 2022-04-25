@@ -208,6 +208,27 @@ def test_elastic_depth():
                                  expansion_ratio_choices=[6], teacher=teacher, num_subs_to_sample=2)
 
 
+def test_elastic_width_cifar10():
+    device = get_device()
+    train_data_loader, test_data_loader = get_cifar_dataloaders(device, cifar_dataset=torchvision.datasets.CIFAR10)
+    
+    # net = small_test_ofa_net()
+    net = mobilenetv3_ofa(num_classes=10, max_kernel_size=5)
+    if torch.cuda.is_available():
+        net.load_state_dict(torch.load("checkpoint/big_network.pt"))
+    else:
+        net.load_state_dict(torch.load("checkpoint/big_network.pt", map_location=torch.device('cpu')))
+    net.to(device)
+    teacher = copy.deepcopy(net)
+    print("in elastic kernel")
+    train_loop(net, train_data_loader, test_data_loader, lr=0.0008, epochs=15,
+               depth_choices=[4], kernel_choices=[5],
+               expansion_ratio_choices=[6, 4], teacher=teacher)
+    train_loop(net, train_data_loader, test_data_loader, lr=0.0024, epochs=125,
+               depth_choices=[4], kernel_choices=[5],
+               expansion_ratio_choices=[6, 4, 3], teacher=teacher)
+    
+    
 def test_progressive_shrinking_cifar10():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     train_data_loader, test_data_loader = get_cifar_dataloaders(device, cifar_dataset=torchvision.datasets.CIFAR10)
@@ -305,9 +326,10 @@ if __name__ == "__main__":
     # test_elastic_kernel()
     # test_elastic_kernel_cifar10()
     # test_elastic_depth()
+    test_elastic_width_cifar10()
     # train_smallest_network()
     # train_on_small_kernel_only()
     # 1 epoch/30s on colab
     # test_progressive_shrinking()
-    test_progressive_shrinking_cifar10()
+    # test_progressive_shrinking_cifar10()
     # get_graph()
