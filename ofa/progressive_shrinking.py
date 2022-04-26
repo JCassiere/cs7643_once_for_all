@@ -223,12 +223,13 @@ def train_elastic_depth_stage_2(experiment: Experiment, load_stage=None):
     experiment.log(stage="elastic_depth_stage_2")
 
 
-def train_elastic_width_stage_1(experiment: Experiment, load_stage=None):
+def train_elastic_width_stage_1(experiment: Experiment, load_stage=None, eval_first=True):
     if load_stage:
         experiment.load_net_post_stage(load_stage)
     kernel_choices = experiment.overall_kernel_choices[:]
     depth_choices = experiment.overall_depth_choices[:]
     expansion_ratio_choices = experiment.overall_expansion_ratio_choices[:2]
+    experiment.net.reorder_channels()
     train_loop(
         experiment,
         lr=experiment.elastic_width_lr_stage_1,
@@ -238,7 +239,8 @@ def train_elastic_width_stage_1(experiment: Experiment, load_stage=None):
         expansion_ratio_choices=expansion_ratio_choices,
         weight_decay=3e-5,
         teacher=experiment.get_teacher(),
-        num_subnetworks_per_minibatch=4
+        num_subnetworks_per_minibatch=4,
+        eval_first=eval_first
     )
     experiment.log(stage="elastic_width_stage_1")
 
@@ -249,6 +251,7 @@ def train_elastic_width_stage_2(experiment: Experiment, load_stage=None):
     kernel_choices = experiment.overall_kernel_choices[:]
     depth_choices = experiment.overall_depth_choices[:]
     expansion_ratio_choices = experiment.overall_expansion_ratio_choices[:]
+    experiment.net.reorder_channels()
     train_loop(
         experiment,
         lr=experiment.elastic_width_lr_stage_2,

@@ -9,7 +9,9 @@ from ofa.mobilenetv3_ofa import MobileNetV3OFA
 
 
 class Experiment:
-    def __init__(self, **kwargs):
+    EXPERIMENTS_DIR = "./experiments/"
+    
+    def __init__(self, save=True, **kwargs):
         self.device = get_device()
         # dataset setup
         # choices = {cifar10, cifar100, mnist}
@@ -17,7 +19,7 @@ class Experiment:
         self.train_data_loader, self.val_data_loader = get_dataloaders(self.device, self.dataset_name)
         
         self.experiment_name = kwargs.get("experiment_name", "default_{}".format(int(time.time())))
-        self.save_dir = "./experiments/" + self.experiment_name + "/"
+        self.save_dir = self.EXPERIMENTS_DIR + self.experiment_name + "/"
         if not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
         self.base_net_epochs = kwargs.get("base_net_epochs", 180)
@@ -44,6 +46,16 @@ class Experiment:
         self.use_hard_swishes = kwargs.get("use_hard_swishes", [True, False, False, False, True, True, True, True, True])
         self.strides = kwargs.get("strides", [2, 1, 2, 2, 2, 1, 2, 1, 1])
         
+        self.net = None
+        self.set_net()
+        self.current_stage_train_accuracies = []
+        self.current_stage_val_accuracies = {}
+        self.teacher = None
+        if save:
+            self.save_config()
+    
+    def set_net(self):
+        self.net = None
         input_data_channels = 3
         if self.dataset_name in ["mnist", "cifar10"]:
             num_classes = 10
@@ -70,13 +82,7 @@ class Experiment:
             dropout=self.dropout
         )
         self.net.to(self.device)
-        self.current_stage_train_accuracies = []
-        self.current_stage_val_accuracies = {}
-        self.teacher = None
-        self.save_config()
     
-    # TODO - implement checkpointing system where best weights are checked and saved
-    #  after each epoch
     def log(self, stage: str, clear: bool = True):
         torch.save(self.net.state_dict(), self.save_dir + stage + '.pt')
         
@@ -111,16 +117,16 @@ class Experiment:
     def set_teacher(self):
         self.teacher = copy.deepcopy(self.net)
     
-    def get_teacher(self):
-        # TODO - update teacher after each stage?
-        #  maybe check whether the original teacher or current net gives better results
-        #  for the full network
+    def load_teacher(self, stage):
+        if not self.teacher:
+            self.set_teacher()
+        big_net_checkpoint = self.save_dir + stage + ".pt"
+        self.teacher.load_state_dict(torch.load(big_net_checkpoint, map_location=self.device))
+        
+    def get_teacher(self, stage="big_network"):
+        self.load_teacher(stage)
         return self.teacher
         
-    # TODO - load experiment from config
-    def from_config(self):
-        pass
-    
     def save_config(self):
         config = copy.deepcopy(self.__dict__)
         config.pop("net")
@@ -132,4 +138,23 @@ class Experiment:
         config.pop("teacher")
         with open(self.save_dir + "config.json", 'w') as file:
             json.dump(config, file, indent=4)
+    
+    def load_from_config(self, experiment_name, teacher_stage="big_network"):
+        load_dir = self.EXPERIMENTS_DIR + experiment_name + "/"
+        with open(load_dir + "config.json") as file:
+            self.__dict__ = json.load(file)
+        self.device = get_device()
+        self.train_data_loader, self.val_data_loader = get_dataloaders(self.device, self.dataset_name)
+        self.set_net()
+        self.current_stage_train_accuracies = []
+        self.current_stage_val_accuracies = {}
+        self.teacher = None
+        self.load_teacher(teacher_stage)
+        return self
+
+
+def experiment_from_config(experiment_name, load_stage, teacher_stage="big_network"):
+    experiment = Experiment(save=False).load_from_config(experiment_name, teacher_stage=teacher_stage)
+    experiment.load_net_post_stage(load_stage)
+    return experiment
     
