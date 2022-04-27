@@ -151,7 +151,12 @@ class Experiment:
         self.teacher = None
         self.load_teacher(teacher_stage)
         return self
-
+    
+    def load_from_previous_experiment(self, previous_experiment, stage_to_start_from, teacher_stage="big_network"):
+        previous_experiment.load_net_post_stage(stage_to_start_from)
+        previous_experiment.load_teacher(teacher_stage)
+        self.net = copy.deepcopy(previous_experiment.net)
+        self.teacher = copy.deepcopy(previous_experiment.teacher)
 
 def experiment_from_config(experiment_name, load_stage, teacher_stage="big_network"):
     experiment = Experiment(save=False).load_from_config(experiment_name, teacher_stage=teacher_stage)

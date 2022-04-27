@@ -69,28 +69,30 @@ def test_elastic_width():
     experiment = experiment_from_config(experiment_name, load_stage="elastic_depth_stage_2")
     train_elastic_width_stage_1(experiment)
     train_elastic_width_stage_2(experiment)
-    
+
+
+def load_completed_experiment():
+    # Note that this will only work if you have previously run an experiment called "my_experiment"
+    # and the elastic_depth_stage_2 stage was trained
+    experiment_name = "cifar10_100_epochs_per_stage_1650861792"
+    experiment = experiment_from_config(experiment_name, load_stage="elastic_width_stage_2")
+    train_elastic_width_stage_1(experiment)
+    train_elastic_width_stage_2(experiment)
+
+
 def test_progressive_shrinking():
-    # exp_kwargs = {
-    #     "dataset_name": "cifar10",
-    #     "experiment_name": "cifar10_100_epochs_per_stage_{}".format(int(time.time())),
-    #     "base_net_epochs": 100,
-    #     "elastic_kernel_epochs": 100,
-    #     "elastic_depth_epochs_stage_1": 25,
-    #     "elastic_depth_epochs_stage_2": 100,
-    #     "elastic_width_epochs_stage_1": 25,
-    #     "elastic_width_epochs_stage_2": 100
-    # }
     exp_kwargs = {
-        "dataset_name": "cifar100",
-        "experiment_name": "cifar100_100_epochs_per_stage_{}".format(int(time.time())),
+        "dataset_name": "cifar10",
+        "experiment_name": "cifar10_all_three_kernel_sizes{}".format(int(time.time())),
         "base_net_epochs": 100,
+        "kernel_choices": [3, 5, 7],
         "elastic_kernel_epochs": 100,
         "elastic_depth_epochs_stage_1": 25,
         "elastic_depth_epochs_stage_2": 100,
         "elastic_width_epochs_stage_1": 25,
         "elastic_width_epochs_stage_2": 100
     }
+    
     experiment = Experiment(**exp_kwargs)
     progressive_shrinking_from_scratch(experiment)
 
