@@ -1,6 +1,8 @@
 import torch
 import torchvision
 from torch.utils.data import DataLoader
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
 
 def get_dataloaders(device, dataset_name="cifar100"):
     def collate_fn_to_device(batch):
