@@ -68,6 +68,14 @@ def test_elastic_width():
     train_elastic_width_stage_1(experiment)
     train_elastic_width_stage_2(experiment)
 
+def load_completed_experiment():	
+    # Note that this will only work if you have previously run an experiment called "my_experiment"	
+    # and the elastic_depth_stage_2 stage was trained	
+    experiment_name = "mnist_100_epochs_per_stage_1650946373"	
+    experiment = experiment_from_config(experiment_name, load_stage="elastic_width_stage_2")	
+    train_elastic_width_stage_1(experiment)	
+    train_elastic_width_stage_2(experiment)	
+
 def test_progressive_shrinking():
     exp_kwargs = {
         "dataset_name": "mnist",
