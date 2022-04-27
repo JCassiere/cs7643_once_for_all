@@ -42,9 +42,9 @@ def _make_divisible(v, divisor, min_value=None):
     return new_v
 
 
-class DynamicSELayer(nn.Module):
+class DynamicSqueezeExciteLayer(nn.Module):
     def __init__(self, channels, reduction=4):
-        super(DynamicSELayer, self).__init__()
+        super(DynamicSqueezeExciteLayer, self).__init__()
         self.reduction = reduction
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         hidden_channels = _make_divisible(channels // self.reduction, 8)
@@ -183,7 +183,6 @@ class DynamicDepthwiseConv(nn.Module):
             self.five_by_five_transformation = nn.Parameter(torch.eye(25))
     
     def forward(self, x: torch.Tensor, kernel_size):
-        # TODO - don't copy weights - mask somehow?
         channels = x.size(1)
         weights = self.base_conv.weight[:channels, :, :, :]
         # lay out the kernels in 1D vectors
@@ -241,14 +240,14 @@ class DynamicConv(nn.Module):
         torch.nn.init.xavier_uniform_(self.base_conv.weight)
         
 
-class FirstInvertedResidual(nn.Module):
+class FirstInvertedResidualBlock(nn.Module):
     '''
     The first inverted residual layer is not dynamic. It has an expansion ratio of 1,
     meaning, there is no linear bottleneck at the beginning. It uses a kernel size
     of 3, does not use squeeze-excite, and uses ReLU as its activation function.
     '''
     def __init__(self, in_channels, out_channels, stride=1):
-        super(FirstInvertedResidual, self).__init__()
+        super(FirstInvertedResidualBlock, self).__init__()
         kernel_size = 3
         self.add_residual = stride == 1 and in_channels == out_channels
         hidden_channels = _make_divisible(in_channels, 8)
@@ -278,10 +277,10 @@ class FirstInvertedResidual(nn.Module):
                 module.bias.data.zero_()
         
 
-class DynamicInvertedResidual(nn.Module):
+class DynamicInvertedResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, max_kernel_size=7,
                  max_expansion_ratio=6, stride=1, use_se=True, use_hs=True):
-        super(DynamicInvertedResidual, self).__init__()
+        super(DynamicInvertedResidualBlock, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.use_se = use_se
@@ -295,7 +294,7 @@ class DynamicInvertedResidual(nn.Module):
         self.bottleneck_norm = DynamicBatchNorm(max_hidden_channels)
         self.depthwise_convolution = DynamicDepthwiseConv(max_hidden_channels, max_kernel_size, stride)
         self.depthwise_norm = DynamicBatchNorm(max_hidden_channels)
-        self.se_layer = DynamicSELayer(max_hidden_channels) if use_se else nn.Identity()
+        self.se_layer = DynamicSqueezeExciteLayer(max_hidden_channels) if use_se else nn.Identity()
         self.pointwise_conv = DynamicConv(max_hidden_channels, out_channels, 1, 1)
         self.pointwise_norm = DynamicBatchNorm(out_channels)
     
@@ -341,16 +340,16 @@ class DynamicInvertedResidual(nn.Module):
         self.pointwise_norm.initialize_weights()
 
 
-class DynamicBlock(nn.Module):
+class DynamicMobilenetUnit(nn.Module):
     def __init__(self, in_channels, out_channels, max_kernel_size=7, max_depth=4,
                  max_expansion_ratio=6, stride=1, use_se=True, use_hs=True):
-        super(DynamicBlock, self).__init__()
+        super(DynamicMobilenetUnit, self).__init__()
         self.layers = [
-            DynamicInvertedResidual(in_channels, out_channels, max_kernel_size, max_expansion_ratio,
-                                    stride=stride, use_se=use_se, use_hs=use_hs)
+            DynamicInvertedResidualBlock(in_channels, out_channels, max_kernel_size, max_expansion_ratio,
+                                         stride=stride, use_se=use_se, use_hs=use_hs)
         ] + [
-            DynamicInvertedResidual(out_channels, out_channels, max_kernel_size, max_expansion_ratio,
-                                    use_se=use_se, use_hs=use_hs) for _ in range(max_depth - 1)
+            DynamicInvertedResidualBlock(out_channels, out_channels, max_kernel_size, max_expansion_ratio,
+                                         use_se=use_se, use_hs=use_hs) for _ in range(max_depth - 1)
         ]
         self.layers = nn.ModuleList(self.layers)
         
@@ -393,13 +392,13 @@ class MobileNetV3OFA(nn.Module):
             nn.BatchNorm2d(output_widths[0]),
             activation_function(use_hard_swishes[0])
         )
-        self.first_inverted_residual = FirstInvertedResidual(output_widths[0], output_widths[1], strides[1])
+        self.first_inverted_residual = FirstInvertedResidualBlock(output_widths[0], output_widths[1], strides[1])
         num_pre_block_layers = 2
         num_post_block_layers = 2
         self.num_blocks = len(output_widths) - num_post_block_layers - num_pre_block_layers
         self.blocks = []
         for i in range(num_pre_block_layers, num_pre_block_layers + self.num_blocks):
-            self.blocks.append(DynamicBlock(
+            self.blocks.append(DynamicMobilenetUnit(
                 in_channels=output_widths[i - 1],
                 out_channels=output_widths[i],
                 max_kernel_size=self.max_kernel_size,
