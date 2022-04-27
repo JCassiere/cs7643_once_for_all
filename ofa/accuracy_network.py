@@ -2,15 +2,16 @@ import torch
 import torch.nn as nn
 from collections import OrderedDict
 import os
+import numpy as np
 from progressive_shrinking import get_network_config
 from mobilenetv3_ofa import MobileNetV3OFA
 
 class AccNet(nn.Module):
-    def __init__(self, encoder, hidden_size, layers, device, checkpoint=None):
+    def __init__(self, hidden_size, layers, device, checkpoint=None):
         super(AccNet, self).__init__()
 
         hidden_layers = [nn.Linear(hidden_size, hidden_size) for i in range(layers-1)]
-        hidden_layers.insert(nn.Linear(encoder.n_dim, hidden_size), 0)
+        hidden_layers.insert(nn.Linear(3, hidden_size), 0)
         relus = [nn.ReLU(inplace=True) for i in range(layers)]
         overall = [arr[i] for arr in (hidden_layers, relus) for i in range(layers)]
         overall.append(nn.Linear(hidden_size, 1, bias=False))
@@ -26,8 +27,8 @@ class AccNet(nn.Module):
         
         self.model = self.model.to(device)
 
-    def forward(self, x):
-        x = self.model(x).squeeze() + self.base
+    def forward(self, d, k, e):
+        x = self.model(torch.tensor([d, k, e])).squeeze() + self.base
         return x
 
 
@@ -54,9 +55,10 @@ class AccNetTrainer():
             kernels = config['kernel_sizes']
             expansion_ratios = config['expansion_ratios']
             acc_batch.append(self.net(next(iter(self.dataloader)), depths, kernels, expansion_ratios))
-            config_batch.append(torch.tensor([depths, kernels, expansion_ratios]))
+            config_batch.append([depths, kernels, expansion_ratios])
             if len(acc_batch) == self.batchsize:
-                res = self.model(config)
+                config_batch = np.array(config_batch)
+                res = self.model(torch.tensor(config_batch[:, 0]), torch.tensor(config_batch[:, 1]), torch.tensor(config_batch[:, 2]))
                 loss = nn.CrossEntropyLoss()(res, acc_batch)
                 loss.backward()
                 opt.step()
