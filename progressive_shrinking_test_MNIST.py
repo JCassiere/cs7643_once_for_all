@@ -1,10 +1,10 @@
 import time
 import torch.nn
-from ofa.mobilenetv3 import mobilenetv3_large, mobilenetv3_small
+from ofa.mobilenetv3 import mobilenetv3_small
 from ofa.progressive_shrinking import progressive_shrinking_from_scratch, train_big_network, train_elastic_kernel,\
-    train_elastic_depth_stage_1, train_elastic_depth_stage_2
+    train_elastic_depth_stage_1, train_elastic_depth_stage_2, train_elastic_width_stage_1, train_elastic_width_stage_2
 from ofa.utils import get_device
-from ofa.experiment import Experiment
+from ofa.experiment import Experiment, experiment_from_config
 from ofa.datasets import get_dataloaders
     
 def train_mobilenetv3_MNIST():
@@ -46,25 +46,27 @@ def train_mobilenetv3ofa_MNIST_no_shrinking():
     
         
 def test_elastic_kernel():
-    exp_kwargs = {
-        "dataset_name": "mnist",
-        "experiment_name": "my_experiment"
-    }
-    experiment = Experiment(**exp_kwargs)
     # Note that this will only work if you have previously run an experiment called "my_experiment"
     # and the big_network was trained
-    train_elastic_kernel(experiment, load_stage="big_network")
+    experiment_name = "my_experiment"
+    experiment = experiment_from_config(experiment_name, load_stage="big_network")
+    train_elastic_kernel(experiment)
 
 def test_elastic_depth():
-    exp_kwargs = {
-        "dataset_name": "mnist",
-        "experiment_name": "my_experiment"
-    }
-    experiment = Experiment(**exp_kwargs)
     # Note that this will only work if you have previously run an experiment called "my_experiment"
-    # and the big_network was trained
-    train_elastic_depth_stage_1(experiment, load_stage="big_network")
+    # and the elastic_kernel stage was trained
+    experiment_name = "my_experiment"
+    experiment = experiment_from_config(experiment_name, load_stage="elastic_kernel")
+    train_elastic_depth_stage_1(experiment)
     train_elastic_depth_stage_2(experiment)
+
+def test_elastic_width():
+    # Note that this will only work if you have previously run an experiment called "my_experiment"
+    # and the elastic_depth_stage_2 stage was trained
+    experiment_name = "my_experiment"
+    experiment = experiment_from_config(experiment_name, load_stage="elastic_depth_stage_2")
+    train_elastic_width_stage_1(experiment)
+    train_elastic_width_stage_2(experiment)
 
 def test_progressive_shrinking():
     exp_kwargs = {
@@ -84,4 +86,5 @@ def test_progressive_shrinking():
 if __name__ == "__main__":
     # test_elastic_kernel()
     # test_elastic_depth()
+    # test_elastic_width()
     test_progressive_shrinking()
