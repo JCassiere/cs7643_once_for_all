@@ -31,26 +31,26 @@ def plot_curves(train_accuracy, test_accuracy, title):
     plt.show()
 
 if __name__ == "__main__":
-    f = open('../experiments/mnist_100_epochs_per_stage_1650946373/big_network_results.json')
+    f = open('../experiments/cifar10_100_epochs_per_stage_1650861792/big_network_results.json')
     data = json.load(f)
     plot_curves(data['train_accuracies'],data['val_accuracies'], 'Big Network Accuracy Curve (5-Epoch Moving Average)')
     
-    f = open('../experiments/mnist_100_epochs_per_stage_1650946373/elastic_depth_stage_1_results.json')
+    f = open('../experiments/cifar10_100_epochs_per_stage_1650861792/elastic_depth_stage_1_results.json')
     data = json.load(f)
     plot_curves(data['train_accuracies'], data['val_accuracies'], 'Elastic Depth Stage 1 Accuracy Curve (5-Epoch Moving Average)')
     
-    f = open('../experiments/mnist_100_epochs_per_stage_1650946373/elastic_depth_stage_2_results.json')
+    f = open('../experiments/cifar10_100_epochs_per_stage_1650861792/elastic_depth_stage_2_results.json')
     data = json.load(f)
     plot_curves(data['train_accuracies'], data['val_accuracies'], 'Elastic Depth Stage 2 Accuracy Curve (5-Epoch Moving Average)')
     
-    f = open('../experiments/mnist_100_epochs_per_stage_1650946373/elastic_kernel_results.json')
+    f = open('../experiments/cifar10_100_epochs_per_stage_1650861792/elastic_kernel_results.json')
     data = json.load(f)
     plot_curves(data['train_accuracies'], data['val_accuracies'], 'Elastic Kernel Curve (5-Epoch Moving Average)')
     
-    f = open('../experiments/mnist_100_epochs_per_stage_1650946373/elastic_width_stage_1_results.json')
+    f = open('../experiments/cifar10_100_epochs_per_stage_1650861792/elastic_width_stage_1_results.json')
     data = json.load(f)
     plot_curves(data['train_accuracies'], data['val_accuracies'], 'Elastic Width Stage 1 Accuracy Curve (5-Epoch Moving Average)')
     
-    f = open('../experiments/mnist_100_epochs_per_stage_1650946373/elastic_width_stage_2_results.json')
+    f = open('../experiments/cifar10_100_epochs_per_stage_1650861792/elastic_width_stage_2_results.json')
     data = json.load(f)
     plot_curves(data['train_accuracies'], data['val_accuracies'], 'Elastic Width Stage 2 Accuracy Curve (5-Epoch Moving Average)')
