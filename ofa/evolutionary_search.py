@@ -1,15 +1,15 @@
 import random
-from cs7643_once_for_all.ofa.accuracy_network import AccNetTrainer
-from cs7643_once_for_all.ofa.model_arch import ModelArch
+from ofa.accuracy_network import AccNetTrainer
+from ofa.model_arch import ModelArch
 import copy
+from ofa.progressive_shrinking import get_network_config
 
 
 class EvoSearch:
-    def __init__(self, architectures: list, pop: int, cycles: int, samples: int) -> None:
+    def __init__(self, pop: int, cycles: int, samples: int) -> None:
         self.P = pop
         self.C = cycles
         self.S = samples
-        self.arch = architectures
 
     def search(self, net, loader, batchsize=64, num_blocks = 5, kernel_choices = [3, 5, 7], depth_choices = [2, 3, 4], expansion_ratio_choices = [3, 4, 6]):
         population = []
@@ -18,15 +18,9 @@ class EvoSearch:
         acc_net_trainer.train()
         
         for i in range(self.P):
-            depths = random.choice(depth_choices)
-            kernels = random.choice(kernel_choices)
-            ex_ratios = random.choice(expansion_ratio_choices)
-            config = {}
-            config['depths'] = depths
-            config['kernel_sizes'] = kernels
-            config['expansion_ratios'] = ex_ratios
-            model = ModelArch(config)
-            model.acc = acc_net_trainer.model(depths, kernels, ex_ratios)
+            config = get_network_config(num_blocks, kernel_choices, depth_choices, expansion_ratio_choices)
+            model = ModelArch(config, num_blocks, depth_choices, kernel_choices, expansion_ratio_choices)
+            model.acc = acc_net_trainer.model(model.depth, model.kernel, model.expansion_ratio)
             population.append(model)
             history.append(model)
         

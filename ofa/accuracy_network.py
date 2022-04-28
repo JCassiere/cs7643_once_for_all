@@ -3,15 +3,15 @@ import torch.nn as nn
 from collections import OrderedDict
 import os
 import numpy as np
-from progressive_shrinking import get_network_config
-from mobilenetv3_ofa import MobileNetV3OFA
+from ofa.progressive_shrinking import get_network_config
+from ofa.mobilenetv3_ofa import MobileNetV3OFA
 
 class AccNet(nn.Module):
-    def __init__(self, hidden_size, layers, device, checkpoint=None):
+    def __init__(self, device, num_blocks = 5, kernel_choices = [3, 5, 7], depth_choices = [2, 3, 4], expansion_ratio_choices = [3, 4, 6], hidden_size=300, layers=3, checkpoint=None):
         super(AccNet, self).__init__()
-
+        input_dim = num_blocks * (len(depth_choices) + len(kernel_choices) * max(depth_choices) + len(expansion_ratio_choices) * max(depth_choices))
         hidden_layers = [nn.Linear(hidden_size, hidden_size) for i in range(layers-1)]
-        hidden_layers.insert(nn.Linear(3, hidden_size), 0)
+        hidden_layers.insert(nn.Linear(input_dim, hidden_size), 0)
         relus = [nn.ReLU(inplace=True) for i in range(layers)]
         overall = [arr[i] for arr in (hidden_layers, relus) for i in range(layers)]
         overall.append(nn.Linear(hidden_size, 1, bias=False))
@@ -28,18 +28,19 @@ class AccNet(nn.Module):
         self.model = self.model.to(device)
 
     def forward(self, d, k, e):
+
         x = self.model(torch.tensor([d, k, e])).squeeze() + self.base
         return x
 
 
 
 class AccNetTrainer():
-    def __init__(self, num_samples, net, dataloader, batch_size, num_blocks = 5, kernel_choices = [3, 5, 7], depth_choices = [2, 3, 4], expansion_ratio_choices = [3, 4, 6]):
+    def __init__(self, num_samples, net, dataloader, batch_size, device, num_blocks = 5, kernel_choices = [3, 5, 7], depth_choices = [2, 3, 4], expansion_ratio_choices = [3, 4, 6]):
         self.n_samples = num_samples
         self.net = net
         self.batchsize = batch_size
         self.dataloader = dataloader
-        self.model = AccNet()
+        self.model = AccNet(device=device, num_blocks=num_blocks, kernel_choices=kernel_choices, depth_choices=depth_choices, expansion_ratio_choices=expansion_ratio_choices)
         self.num_blocks = num_blocks
         self.kernel_choices = kernel_choices
         self.depth_choices = depth_choices
