@@ -65,7 +65,7 @@ def test_elastic_depth():
 def test_elastic_width():
     # Note that this will only work if you have previously run an experiment called "my_experiment"
     # and the elastic_depth_stage_2 stage was trained
-    experiment_name = "my_experiment"
+    experiment_name = "cifar10_100_epochs_per_stage_1650861792"
     experiment = experiment_from_config(experiment_name, load_stage="elastic_depth_stage_2")
     train_elastic_width_stage_1(experiment)
     train_elastic_width_stage_2(experiment)
@@ -100,6 +100,6 @@ def test_progressive_shrinking():
 if __name__ == "__main__":
     # test_elastic_kernel()
     # test_elastic_depth()
-    # test_elastic_width()
-    test_progressive_shrinking()
+    test_elastic_width()
+    #test_progressive_shrinking()
     
