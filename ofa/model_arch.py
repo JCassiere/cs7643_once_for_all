@@ -5,7 +5,7 @@ class ModelArch:
     names = 1
     def __init__(self, config_dict, n, d_c, k_c, e_c, name = None, acc = None) -> None:
         self.name = str(ModelArch.names) if name is None else name
-        self.accuracy = acc
+        self.acc = acc
         self.config_dict = config_dict
         self.blocks = n
         self.depth_c = d_c

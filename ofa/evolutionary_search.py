@@ -11,16 +11,16 @@ class EvoSearch:
         self.C = cycles
         self.S = samples
 
-    def search(self, net, loader, batchsize=64, num_blocks = 5, kernel_choices = [3, 5, 7], depth_choices = [2, 3, 4], expansion_ratio_choices = [3, 4, 6]):
+    def search(self, net, loader, device, batchsize=64, num_blocks = 5, kernel_choices = [3, 5, 7], depth_choices = [2, 3, 4], expansion_ratio_choices = [3, 4, 6]):
         population = []
         history = []
-        acc_net_trainer = AccNetTrainer(net, loader, batchsize, num_blocks, kernel_choices, depth_choices, expansion_ratio_choices)
+        acc_net_trainer = AccNetTrainer(net=net, num_samples=64, dataloader=loader, batch_size=batchsize, num_blocks=num_blocks, device=device, kernel_choices=kernel_choices, depth_choices=depth_choices, expansion_ratio_choices=expansion_ratio_choices)
         acc_net_trainer.train()
         
         for i in range(self.P):
             config = get_network_config(num_blocks, kernel_choices, depth_choices, expansion_ratio_choices)
             model = ModelArch(config, num_blocks, depth_choices, kernel_choices, expansion_ratio_choices)
-            model.acc = acc_net_trainer.model(model.depth, model.kernel, model.expansion_ratio)
+            model.acc = acc_net_trainer.model(model.get_arch_rep())
             population.append(model)
             history.append(model)
         
@@ -30,26 +30,29 @@ class EvoSearch:
                 candidate = random.choice(population)
                 sample.append(candidate)
             
-            parent = max(sample, key=lambda x: x.accuracy)
-            child_config_dict = self.mutate(parent.config_dict, kernel_choices, depth_choices, expansion_ratio_choices)
-            child = ModelArch(name=parent+"_mutated", config_dict=child_config_dict)
-            child.acc = acc_net_trainer.model(child.depth, child.kernel, child.expansion_ratio)
+            parent = max(sample, key=lambda x: x.acc)
+            child_config_dict = self.mutate(parent.config_dict, num_blocks, kernel_choices, depth_choices, expansion_ratio_choices)
+            child = ModelArch(name=parent.name+"_mutated", config_dict=child_config_dict, n=num_blocks, d_c=depth_choices, k_c=kernel_choices, e_c=expansion_ratio_choices)
+            child.acc = acc_net_trainer.model(child.get_arch_rep())
             population.append(child)
             history.append(child)
             dead = population.pop(0)
             del dead
 
-        return max(history, lambda x: x.acc)
+        return max(history, key=lambda x: x.acc)
 
-    def mutate(self, config_dict, kernel_choices, depth_choices, expansion_ratio_choices):
+    def mutate(self, config_dict, num_blocks, kernel_choices, depth_choices, expansion_ratio_choices):
         new_dict = copy.deepcopy(config_dict)
-        choice = random.choice([0, 1, 2])
-        if choice == 0:
-            new_dict['depths'] = random.choice(depth_choices)
-        elif choice == 1:
-            new_dict["kernel_sizes"] = random.choice(kernel_choices)
-        elif choice == 2:
-            new_dict["expansion_ratios"] = random.choice(expansion_ratio_choices)
+        block = random.randrange(num_blocks)
+        depth = random.choice(depth_choices)
+        block_kernels = []
+        block_expansion_ratios = []
+        for _ in range(depth):
+            block_kernels.append(random.choice(kernel_choices))
+            block_expansion_ratios.append(random.choice(expansion_ratio_choices))
+        new_dict["depths"][block] = depth
+        new_dict["kernel_sizes"][block] = block_kernels
+        new_dict["expansion_ratios"][block] = block_expansion_ratios
 
         return new_dict
 
