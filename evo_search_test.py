@@ -16,7 +16,7 @@ exp_kwargs = {
 
 exp = Experiment(**exp_kwargs)
 exp.net.load_state_dict(torch.load("checkpoint/elastic_width_stage_2.pt", map_location=torch.device(device)))
-search = EvoSearch(2, 2, 2)
+search = EvoSearch(32, 32, 32)
 # random.seed(100)
 num_blocks = 5
 kernel_choices = [3, 5, 7]
@@ -35,4 +35,9 @@ model = ModelArch(config,n=num_blocks, d_c=depth_choices, k_c=kernel_choices, e_
 batchsize = 64
 train_data_loader, test_data_loader = get_dataloaders(device, dataset_name="cifar10")
 
-result = search.search(net=exp.net, loader=train_data_loader, batchsize=batchsize, num_blocks=num_blocks, device=device, kernel_choices=kernel_choices, depth_choices=depth_choices, expansion_ratio_choices=expansion_ratio_choices)
+result, total_list = search.search(net=exp.net, loader=train_data_loader, batchsize=batchsize, num_blocks=num_blocks, device=device, kernel_choices=kernel_choices, depth_choices=depth_choices, expansion_ratio_choices=expansion_ratio_choices)
+
+print(result)
+
+for i in range(0, 10):
+    print(total_list[i])

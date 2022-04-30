@@ -70,9 +70,9 @@ def get_dataloaders(device, dataset_name="cifar100"):
         download=True,
         transform=test_transform)
     
-    train_data_loader = DataLoader(train_dataset, batch_size=64, shuffle=True,
+    train_data_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, drop_last=True,
                                    collate_fn=collate_fn_to_device)
-    test_data_loader = DataLoader(test_dataset, batch_size=256, shuffle=True,
+    test_data_loader = DataLoader(test_dataset, batch_size=256, shuffle=True, drop_last=True,
                                   collate_fn=collate_fn_to_device)
     
     return train_data_loader, test_data_loader

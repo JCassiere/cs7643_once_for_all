@@ -3,7 +3,7 @@ import numpy as np
 import torch
 class ModelArch:
     names = 1
-    def __init__(self, config_dict, n, d_c, k_c, e_c, name = None, acc = None) -> None:
+    def __init__(self, config_dict, n, d_c, k_c, e_c, name = None, acc = None, lat=None) -> None:
         self.name = str(ModelArch.names) if name is None else name
         self.acc = acc
         self.config_dict = config_dict
@@ -11,6 +11,7 @@ class ModelArch:
         self.depth_c = d_c
         self.kernel_c = k_c
         self.expansion_ratio_c = e_c
+        self.lat = lat
         ModelArch.names += 1
 
     @property
@@ -50,3 +51,8 @@ class ModelArch:
         expansion_r = np.array(expansion_r)
         
         return torch.tensor(np.concatenate((depths.flatten(), kernels.flatten(), expansion_r.flatten()), axis=0))
+
+    def __str__(self):
+        dict_ = "Dict: " + str(self.config_dict)
+        acc_lat = "Acc: " + str(self.acc) + " Latency: " + str(self.lat)
+        return self.name + "\n" + dict_ + "\n" + acc_lat + "\n"

@@ -299,6 +299,7 @@ class DynamicInvertedResidualBlock(nn.Module):
         self.pointwise_norm = DynamicBatchNorm(out_channels)
     
     def forward(self, x, kernel_size, width_expansion_ratio):
+        
         hidden_channels = _make_divisible(self.in_channels * width_expansion_ratio, 8)
         y = self.bottleneck.forward(x, self.in_channels, hidden_channels)
         y = self.bottleneck_norm.forward(y)
@@ -309,8 +310,8 @@ class DynamicInvertedResidualBlock(nn.Module):
         y = self.se_layer.forward(y)
         y = self.pointwise_conv.forward(y, hidden_channels, self.out_channels)
         y = self.pointwise_norm.forward(y)
-        
-        if self.add_residual:
+
+        if self.add_residual and x.shape == y.shape:
             return x + y
         else:
             return y

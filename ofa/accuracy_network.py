@@ -8,6 +8,8 @@ from ofa.progressive_shrinking import get_network_config
 from ofa.mobilenetv3_ofa import MobileNetV3OFA
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import gc
+import time
 
 class AccNet(nn.Module):
     def __init__(self, device, num_blocks = 5, kernel_choices = [3, 5, 7], depth_choices = [2, 3, 4], expansion_ratio_choices = [3, 4, 6], hidden_size=300, layers=3, checkpoint=None):
@@ -48,18 +50,38 @@ class AccNetTrainer():
         self.kernel_choices = kernel_choices
         self.depth_choices = depth_choices
         self.expansion_ratio_choices = expansion_ratio_choices
+        self.arch_list = []
 
     def train(self):
-        
+        epochs = 1
         opt = torch.optim.Adam(self.model.parameters(), lr=0.05)
-        for img, label in tqdm(self.dataloader):
-            config = get_network_config(self.num_blocks, self.kernel_choices, self.depth_choices, self.expansion_ratio_choices)
-            arch = ModelArch(config_dict=config, n=self.num_blocks, d_c=self.depth_choices, k_c=self.kernel_choices, e_c=self.expansion_ratio_choices)
-            accs = self.net(img)
-            accs = nn.CrossEntropyLoss()(accs, label)
-            res = self.model(arch.get_arch_rep())
-            torch.autograd.set_detect_anomaly(True)
-            loss = nn.MSELoss()(res, accs.double())
-            loss.backward()
-            opt.step()
+        
+        for i in range(epochs):
+            j = 0
+            # gc.collect()
+            for img, label in tqdm(self.dataloader):
+                if i == 0:
+                    config = get_network_config(self.num_blocks, self.kernel_choices, self.depth_choices, self.expansion_ratio_choices)
+                    arch = ModelArch(config_dict=config, n=self.num_blocks, d_c=self.depth_choices, k_c=self.kernel_choices, e_c=self.expansion_ratio_choices)
+                    self.arch_list.append(arch)
+                else:
+                    arch = self.arch_list[j]
+                    j += 1
+                
+                start_time = time.time()
+                # print(len(arch.depth))
+                # print(len(arch.kernel))
+                # print(len(arch.expansion_ratio))
+                res = self.net(img, arch.depth, arch.kernel, arch.expansion_ratio)
+                
+                lat = time.time() - start_time
+                accs = nn.CrossEntropyLoss()(res, label)
+                maxs = res.argmax(dim=1)
+                mean_acc = torch.sum(maxs == label) / len(maxs)
+                arch.acc = (arch.acc * i + mean_acc) / (i+1) if i != 0 else mean_acc
+                arch.lat = (arch.lat * i + lat) / (i+1) if i != 0 else lat
+                res = self.model(arch.get_arch_rep())
+                loss = nn.MSELoss()(res, torch.tensor([accs.double()]))
+                loss.backward()
+                opt.step()
 

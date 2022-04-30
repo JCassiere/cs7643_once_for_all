@@ -17,14 +17,13 @@ class EvoSearch:
         acc_net_trainer = AccNetTrainer(net=net, num_samples=64, dataloader=loader, batch_size=batchsize, num_blocks=num_blocks, device=device, kernel_choices=kernel_choices, depth_choices=depth_choices, expansion_ratio_choices=expansion_ratio_choices)
         acc_net_trainer.train()
         
-        for i in range(self.P):
-            config = get_network_config(num_blocks, kernel_choices, depth_choices, expansion_ratio_choices)
-            model = ModelArch(config, num_blocks, depth_choices, kernel_choices, expansion_ratio_choices)
+        for _ in range(self.P):
+            model = random.choice(acc_net_trainer.arch_list)
             model.acc = acc_net_trainer.model(model.get_arch_rep())
             population.append(model)
             history.append(model)
         
-        for i in range(self.C):
+        for _ in range(self.C):
             sample = []
             for j in range(self.S):
                 candidate = random.choice(population)
@@ -39,7 +38,7 @@ class EvoSearch:
             dead = population.pop(0)
             del dead
 
-        return max(history, key=lambda x: x.acc)
+        return max(history, key=lambda x: x.acc), history
 
     def mutate(self, config_dict, num_blocks, kernel_choices, depth_choices, expansion_ratio_choices):
         new_dict = copy.deepcopy(config_dict)
