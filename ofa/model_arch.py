@@ -27,11 +27,11 @@ class ModelArch:
         return self.config_dict['expansion_ratios']
 
     def get_arch_rep(self):
-        depths = np.zeros((self.blocks, len(self.depth_c)))
+        # depths = np.zeros((self.blocks, len(self.depth_c)))
         kernels = []
         expansion_r = []
         for i in range(self.blocks):
-            depths[i][self.depth_c.index(self.depth[i])] = 1
+            # depths[i][self.depth_c.index(self.depth[i])] = 1
             kernel = self.kernel[i]
             er = self.expansion_ratio[i]
             for j in range(self.depth[i]):
@@ -50,7 +50,7 @@ class ModelArch:
         kernels = np.array(kernels)
         expansion_r = np.array(expansion_r)
         
-        return torch.tensor(np.concatenate((depths.flatten(), kernels.flatten(), expansion_r.flatten()), axis=0))
+        return torch.tensor(np.concatenate((kernels.flatten(), expansion_r.flatten()), axis=0))
 
     def __str__(self):
         dict_ = "Dict: " + str(self.config_dict)

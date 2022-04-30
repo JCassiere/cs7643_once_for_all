@@ -12,9 +12,9 @@ import gc
 import time
 
 class AccNet(nn.Module):
-    def __init__(self, device, num_blocks = 5, kernel_choices = [3, 5, 7], depth_choices = [2, 3, 4], expansion_ratio_choices = [3, 4, 6], hidden_size=300, layers=3, checkpoint=None):
+    def __init__(self, device, num_blocks = 5, kernel_choices = [3, 5, 7], depth_choices = [2, 3, 4], expansion_ratio_choices = [3, 4, 6], hidden_size=400, layers=3, checkpoint=None):
         super(AccNet, self).__init__()
-        input_dim = num_blocks * (len(depth_choices) + len(kernel_choices) * max(depth_choices) + len(expansion_ratio_choices) * max(depth_choices))
+        input_dim = num_blocks * (len(kernel_choices) * max(depth_choices) + len(expansion_ratio_choices) * max(depth_choices))
         
         hidden_layers = [nn.Linear(hidden_size, hidden_size) for i in range(layers-1)]
         hidden_layers.insert(0, nn.Linear(input_dim, hidden_size))
@@ -35,6 +35,7 @@ class AccNet(nn.Module):
 
     def forward(self, x):
         x = self.model(x).squeeze() + self.base
+        # return nn.Sigmoid()(x)
         return x
 
 
@@ -53,8 +54,8 @@ class AccNetTrainer():
         self.arch_list = []
 
     def train(self):
-        epochs = 1
-        opt = torch.optim.Adam(self.model.parameters(), lr=0.05)
+        epochs = 10
+        opt = torch.optim.Adam(self.model.parameters(), lr=1e-6)
         
         for i in range(epochs):
             j = 0
@@ -75,13 +76,17 @@ class AccNetTrainer():
                 res = self.net(img, arch.depth, arch.kernel, arch.expansion_ratio)
                 
                 lat = time.time() - start_time
-                accs = nn.CrossEntropyLoss()(res, label)
                 maxs = res.argmax(dim=1)
                 mean_acc = torch.sum(maxs == label) / len(maxs)
                 arch.acc = (arch.acc * i + mean_acc) / (i+1) if i != 0 else mean_acc
+                # print(arch.acc)
                 arch.lat = (arch.lat * i + lat) / (i+1) if i != 0 else lat
-                res = self.model(arch.get_arch_rep())
-                loss = nn.MSELoss()(res, torch.tensor([accs.double()]))
+                res = self.model(arch.get_arch_rep().double())
+                print(res)
+                print(arch.acc.double())
+                criterion = nn.MSELoss()
+                loss = torch.sqrt(criterion(res, torch.tensor([arch.acc.double()])))
+                print(loss)
                 loss.backward()
                 opt.step()
 
