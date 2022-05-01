@@ -3,7 +3,7 @@ from ofa.accuracy_network import AccNetTrainer
 from ofa.model_arch import ModelArch
 import copy
 from ofa.progressive_shrinking import get_network_config
-
+import time
 
 class EvoSearch:
     def __init__(self, pop: int, cycles: int, samples: int) -> None:
@@ -15,11 +15,11 @@ class EvoSearch:
         population = []
         history = []
         acc_net_trainer = AccNetTrainer(net=net, num_samples=64, dataloader=loader, batch_size=batchsize, num_blocks=num_blocks, device=device, kernel_choices=kernel_choices, depth_choices=depth_choices, expansion_ratio_choices=expansion_ratio_choices)
-        acc_net_trainer.train()
+        acc_net_trainer.train(save=True)
         
         for _ in range(self.P):
             model = random.choice(acc_net_trainer.arch_list)
-            model.acc = acc_net_trainer.model(model.get_arch_rep())
+            model.acc = acc_net_trainer.model(model.get_arch_rep()).item()
             population.append(model)
             history.append(model)
         
@@ -31,14 +31,16 @@ class EvoSearch:
             
             parent = max(sample, key=lambda x: x.acc)
             child_config_dict = self.mutate(parent.config_dict, num_blocks, kernel_choices, depth_choices, expansion_ratio_choices)
-            child = ModelArch(name=parent.name+"_mutated", config_dict=child_config_dict, n=num_blocks, d_c=depth_choices, k_c=kernel_choices, e_c=expansion_ratio_choices)
-            child.acc = acc_net_trainer.model(child.get_arch_rep())
+            child = ModelArch(name=parent.name, config_dict=child_config_dict, n=num_blocks, d_c=depth_choices, k_c=kernel_choices, e_c=expansion_ratio_choices)
+            child.mutations += 1
+            child.acc = acc_net_trainer.model(child.get_arch_rep().double()).item()
+            child.lat = acc_net_trainer.lat_model(child.get_arch_rep().double()).item()
             population.append(child)
             history.append(child)
             dead = population.pop(0)
             del dead
 
-        return max(history, key=lambda x: x.acc), history
+        return max(history, key=lambda x: x.acc), history, population, acc_net_trainer.arch_list
 
     def mutate(self, config_dict, num_blocks, kernel_choices, depth_choices, expansion_ratio_choices):
         new_dict = copy.deepcopy(config_dict)

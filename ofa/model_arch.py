@@ -12,6 +12,7 @@ class ModelArch:
         self.kernel_c = k_c
         self.expansion_ratio_c = e_c
         self.lat = lat
+        self.mutations = 0
         ModelArch.names += 1
 
     @property
@@ -54,5 +55,5 @@ class ModelArch:
 
     def __str__(self):
         dict_ = "Dict: " + str(self.config_dict)
-        acc_lat = "Acc: " + str(self.acc) + " Latency: " + str(self.lat)
-        return self.name + "\n" + dict_ + "\n" + acc_lat + "\n"
+        metrics = "Acc: " + str(self.acc) + " Latency: " + str(self.lat) + " Mutations: " + str(self.mutations)
+        return self.name + "\n" + dict_ + "\n" + metrics + "\n"
