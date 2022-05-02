@@ -59,7 +59,7 @@ def plot_curves(train_accuracy, test_accuracy, tuned_train_accuracy, tuned_test_
 if __name__ == "__main__":
     '''exp_kwargs = {
         "dataset_name": "cifar10",
-        "experiment_name": "cifar100_100_epochs_per_stage_1650948868",
+        "experiment_name": "cifar10_sub_net1651440498",
         "kernel_choices": [3],
         "depth_choices": [4],
         "expansion_ratio_choices": [3],
