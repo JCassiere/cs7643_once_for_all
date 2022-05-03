@@ -1,0 +1,72 @@
+{
+    "dataset_name": "cifar10",
+    "experiment_name": "cifar10_100_epochs_per_stage_1650861792",
+    "save_dir": "./experiments/cifar10_100_epochs_per_stage_1650861792/",
+    "base_net_epochs": 180,
+    "base_net_lr": 0.026,
+    "overall_kernel_choices": [
+        3
+    ],
+    "elastic_kernel_epochs": 125,
+    "elastic_kernel_lr": 0.0096,
+    "overall_depth_choices": [
+        4
+    ],
+    "elastic_depth_epochs_stage_1": 25,
+    "elastic_depth_lr_stage_1": 0.0008,
+    "elastic_depth_epochs_stage_2": 125,
+    "elastic_depth_lr_stage_2": 0.0024,
+    "overall_expansion_ratio_choices": [
+        3
+    ],
+    "elastic_width_epochs_stage_1": 25,
+    "elastic_width_lr_stage_1": 0.0008,
+    "elastic_width_epochs_stage_2": 125,
+    "elastic_width_lr_stage_2": 0.0024,
+    "dropout": 0.1,
+    "width_mult": 1,
+    "net_output_widths": [
+        16,
+        16,
+        24,
+        40,
+        80,
+        112,
+        160,
+        960,
+        1280
+    ],
+    "use_squeeze_excites": [
+        false,
+        false,
+        false,
+        true,
+        false,
+        true,
+        true,
+        false,
+        false
+    ],
+    "use_hard_swishes": [
+        true,
+        false,
+        false,
+        false,
+        true,
+        true,
+        true,
+        true,
+        true
+    ],
+    "strides": [
+        2,
+        1,
+        2,
+        2,
+        2,
+        1,
+        2,
+        1,
+        1
+    ]
+}
